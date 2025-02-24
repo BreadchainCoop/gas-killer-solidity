@@ -7,6 +7,9 @@ contract VotingContract {
 
     // Tracks our “current” total voting power.
     uint256 public currentTotalVotingPower;
+    // Tracks if the last vote passed
+    bool public lastVotePassed;
+
 
     // We store, for each blockNumber, an encoded array of voters that existed at that point.
     mapping(uint256 => bytes) public votersArrayStorage;
@@ -65,47 +68,112 @@ contract VotingContract {
      */
     function executeVote() external returns (bool) {
         // Recompute total from the voters stored at the current block.
-        currentTotalVotingPower = getCurrentTotalVotingPower(block.number);
+        uint256 newVotingPower = getCurrentTotalVotingPower(block.number);
+
+        // Update the current total voting power.
+        currentTotalVotingPower = newVotingPower;
 
         // Check if the total voting power is even
-        bool votePassed = (currentTotalVotingPower % 2 == 0);
+        bool votePassed = (newVotingPower % 2 == 0);
+
+        // Store whether this vote passed
+        lastVotePassed = votePassed;
 
         // Return whether the vote passed
         return votePassed;
     }
 
-    // /**
-    //  * @notice Overloaded version with parameters. In a real contract,
-    //  *         you would verify the aggBlsSig, etc. Here we just show the structure.
-    //  */
-    // function executeVote(
-    //     bytes calldata aggBlsSig,
-    //     uint256 newCurrentVotingPower,
+    // ------------------------------------------------------------------------
+    //  THREE ADDITIONAL EXECUTE/SLASH FUNCTIONS
+    // ------------------------------------------------------------------------
+
+
+    function operatorExecuteVote(uint256 blockNumber)
+        external
+        view
+        returns (bytes memory)
+    {
+        // 1) Calculate new voting power
+        uint256 newVotingPower = getCurrentTotalVotingPower(blockNumber);
+
+        // 2) Determine if vote passes (true if even)
+        bool votePassed = (newVotingPower % 2 == 0);
+
+        // 3) Build the bytes payload to do:
+        //    sstore(1, newVotingPower)
+        //    sstore(2, votePassed ? 1 : 0 )
+        // Using the format:
+        //   - 1 byte: 0 => indicates "SSTORE"
+        //   - 32 bytes: slot index
+        //   - 32 bytes: value
+        //
+        // We do that twice: once for currentTotalVotingPower, once for lastVotePassed.
+        
+        bytes memory encoded = abi.encodePacked(
+            // SSTORE currentTotalVotingPower
+            uint8(0),              // op = 0 => SSTORE
+            uint256(1),            // slot = 1
+            newVotingPower,        // value
+            // SSTORE lastVotePassed
+            uint8(0),              // op = 0 => SSTORE
+            uint256(2),            // slot = 2
+            votePassed ? uint256(1) : uint256(0) // value
+        );
+
+        return encoded;
+    }
+
+
+    function writeExecuteVote(bytes calldata aggSig, bytes calldata storageUpdates)
+        external
+        returns (bytes memory)
+    {
+        // In a real system, you’d verify aggSig here before applying the updates.
+        // For demonstration, we just parse and apply them.
+
+        uint256 i = 0;
+        while (i < storageUpdates.length) {
+            require(i + 1 <= storageUpdates.length, "Invalid data offset");
+            // First byte is the op code
+            uint8 op = uint8(storageUpdates[i]);
+            i++;
+
+            // We only handle SSTORE (op == 0)
+            require(op == 0, "Unsupported operation (only op=0 allowed)");
+
+            // Next 32 bytes is the slot
+            require(i + 32 <= storageUpdates.length, "Missing slot data");
+            uint256 slot;
+            assembly {
+                slot := calldataload(add(storageUpdates.offset, i))
+            }
+            i += 32;
+
+            // Next 32 bytes is the value
+            require(i + 32 <= storageUpdates.length, "Missing value data");
+            uint256 val;
+            assembly {
+                val := calldataload(add(storageUpdates.offset, i))
+            }
+            i += 32;
+
+            // Perform the sstore
+            assembly {
+                sstore(slot, val)
+            }
+        }
+
+        // Return the updated voting power and last vote result
+        return abi.encode(currentTotalVotingPower, lastVotePassed);
+    }
+
+
+    // function slashExecVote(
+    //     bytes calldata aggSig,
+    //     bytes calldata someBytes,
     //     uint256 blockNumber
-    // ) external {
-    //     // Validate or use aggBlsSig as needed (omitted here).
-    //     // Possibly also verify the blockNumber in a real scenario.
+    // ) external returns (bytes memory) {
 
-    //     // Update
-    //     currentTotalVotingPower = newCurrentVotingPower;
-
-    //     // Check that the new total is even
-    //     require(
-    //         currentTotalVotingPower % 2 == 0,
-    //         "Vote did not pass: total voting power is odd."
-    //     );
     // }
 
-    // /**
-    //  * @notice Stub “slashForVote” function. In a real setting, this would have
-    //  *         logic to slash stake based on some proof of misbehavior, etc.
-    //  */
-    // function slashForVote(
-    //     bytes calldata aggBlsSig,
-    //     uint256 newCurrentVotingPower,
-    //     uint256 blockNumber
-    // ) external {
-    //     // In practice, you'd implement slashing logic here.
-    //     // This is just a placeholder.
-    // }
 }
