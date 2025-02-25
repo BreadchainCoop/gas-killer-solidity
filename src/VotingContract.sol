@@ -16,10 +16,17 @@ contract VotingContract {
     BLSSignatureChecker public blsSignatureChecker;
     // The address of the BLS signature checker contract
     address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
-
+    
+    // Hardcoded namespace matching the Rust constant
+    bytes public constant namespace = "_COMMONWARE_AGGREGATION_";
 
     // We store, for each blockNumber, an encoded array of voters that existed at that point.
     mapping(uint256 => bytes) public votersArrayStorage;
+    
+    constructor() {
+        // Initialize the BLS signature checker
+        blsSignatureChecker = BLSSignatureChecker(BLS_SIG_CHECKER);
+    }
 
     /**
      * @notice Adds a new voter and saves the updated voters array
@@ -136,11 +143,23 @@ contract VotingContract {
         bytes calldata quorumNumbers,
         uint32 referenceBlockNumber,
         BLSSignatureChecker.NonSignerStakesAndSignature calldata params,
-        bytes calldata storageUpdates
+        bytes calldata storageUpdates,
+        uint256 blockNumber,
+        address targetAddr,
+        bytes4 targetFunction
     )
         external
         returns (bytes memory)
     {
+        //check that those 4 with namespace match the hash
+        bytes32 expectedHash = keccak256(abi.encodePacked(
+            namespace,
+            blockNumber,
+            targetAddr,
+            targetFunction,
+            storageUpdates
+        ));
+        require(expectedHash == msgHash, "Invalid signature");
         // ------------------------------------------------
         // 1) Verify aggregator signature & get stake info
         // ------------------------------------------------
@@ -201,7 +220,10 @@ contract VotingContract {
     /**
      * @notice Function to verify if a signature is valid and contains correct storage updates
      * @dev Hashes the input parameters and compares with the signature, also verifies storage updates
-     * @param badSignature The signature to verify
+     * @param msgHash The signature hash to verify
+     * @param quorumNumbers The quorum numbers for verification
+     * @param referenceBlockNumber The reference block number for BLS verification
+     * @param params The non-signer stakes and signature data
      * @param storageUpdates The storage updates to verify
      * @param blockNumber The block number to use for verification
      * @param targetAddr The address that the signature is for
@@ -209,15 +231,15 @@ contract VotingContract {
      * @return An encoded result containing verification results
      */
     function slashExecVote(
-        bytes calldata badSignature,
+        bytes32 msgHash,
+        bytes calldata quorumNumbers,
+        uint32 referenceBlockNumber,
+        BLSSignatureChecker.NonSignerStakesAndSignature calldata params,
         bytes calldata storageUpdates,
         uint256 blockNumber,
         address targetAddr,
         bytes4 targetFunction
     ) external view returns (bytes memory) {
-        // Hardcoded namespace matching the Rust constant
-        bytes memory namespace = "_COMMONWARE_AGGREGATION_";
-        
         // Hash all parameters in specified order to create the message hash
         bytes32 expectedHash = keccak256(abi.encodePacked(
             namespace,
@@ -227,16 +249,24 @@ contract VotingContract {
             storageUpdates
         ));
         
-        // Convert badSignature to bytes32 for comparison (simplified for demo)
-        bytes32 signatureHash;
-        if (badSignature.length >= 32) {
-            assembly {
-                signatureHash := calldataload(badSignature.offset)
-            }
-        }
-        
         // Check if signature hash matches expected hash
-        bool signatureValid = (signatureHash == expectedHash);
+        bool signatureValid = (expectedHash == msgHash);
+        
+        // If signature is invalid, we don't need to check BLS signatures
+        if (!signatureValid) {
+            return abi.encode(true); // Slashing needed
+        }
+
+        //send the signature to the checker
+        (
+            BLSSignatureChecker.QuorumStakeTotals memory stakeTotals,
+            bytes32 signatoryRecordHash
+        ) = blsSignatureChecker.checkSignatures(
+            msgHash,
+            quorumNumbers,
+            referenceBlockNumber,
+            params
+        );
         
         // Calculate what the correct storage updates should be
         bytes memory correctUpdates = this.operatorExecuteVote(blockNumber);
@@ -244,16 +274,11 @@ contract VotingContract {
         // Check if provided storage updates match the correct ones
         bool updatesValid = keccak256(storageUpdates) == keccak256(correctUpdates);
         
-        // Slashing is needed if either the signature is invalid or updates are incorrect
-        bool slashNeeded = !signatureValid || !updatesValid;
+        // Slashing is needed if updates are incorrect
+        bool slashNeeded = !updatesValid;
         
-        // Return results
-        return abi.encode(
-            slashNeeded,
-            signatureValid ? "Valid signature" : "Invalid signature",
-            updatesValid ? "Valid storage updates" : "Invalid storage updates",
-            blockNumber
-        );
+        // Return slashing status
+        return abi.encode(slashNeeded);
     }
 
     // Test-only version of writeExecuteVote that skips signature verification

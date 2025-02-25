@@ -145,6 +145,29 @@ contract VotingContractTest is Test {
         return abi.encodePacked(hash);
     }
 
+    // Helper function to create a mock BLS NonSignerStakesAndSignature struct
+    function _createMockNonSignerStakesAndSignature() internal pure returns (BLSSignatureChecker.NonSignerStakesAndSignature memory) {
+        BLSSignatureChecker.NonSignerStakesAndSignature memory params;
+        
+        // Initialize with empty arrays
+        params.quorumApks = new BN254.G1Point[](0);
+        params.nonSignerPubkeys = new BN254.G1Point[](0);
+        params.quorumApkIndices = new uint32[](0);
+        params.nonSignerQuorumBitmapIndices = new uint32[](0);
+        params.totalStakeIndices = new uint32[](0);
+        params.nonSignerStakeIndices = new uint32[][](0);
+        
+        // Initialize the other fields with default values
+        params.sigma = BN254.G1Point(0, 0);
+        
+        // Fix: Use uint256 arrays instead of uint8 arrays
+        uint256[2] memory x = [uint256(0), uint256(0)];
+        uint256[2] memory y = [uint256(0), uint256(0)];
+        params.apkG2 = BN254.G2Point(x, y);
+        
+        return params;
+    }
+
     function testSlashExecVoteValid() public {
         // Add a voter to have some state
         address voter1 = address(0x222);
@@ -156,32 +179,38 @@ contract VotingContractTest is Test {
         // Get the correct storage updates
         bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
         
-        // Generate a valid mock signature
-        bytes memory validSignature = _generateMockSignature(
+        // Create mock parameters for BLS signature verification
+        bytes memory quorumNumbers = new bytes(0);
+        uint32 referenceBlockNumber = uint32(block.number - 1);
+        BLSSignatureChecker.NonSignerStakesAndSignature memory params = _createMockNonSignerStakesAndSignature();
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"));
+        
+        // Generate a valid mock signature hash
+        bytes32 validMsgHash = keccak256(abi.encodePacked(
+            votingContract.namespace(),
             blockNumber,
             address(votingContract),
-            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)")),
+            targetFunction,
             correctUpdates
-        );
+        ));
         
         // Call slashExecVote with valid parameters
         bytes memory result = votingContract.slashExecVote(
-            validSignature,
+            validMsgHash,
+            quorumNumbers,
+            referenceBlockNumber,
+            params,
             correctUpdates,
             blockNumber,
             address(votingContract),
-            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"))
+            targetFunction
         );
         
-        // Decode the result
-        (bool slashNeeded, string memory sigStatus, string memory updateStatus, uint256 returnedBlock) = 
-            abi.decode(result, (bool, string, string, uint256));
+        // Decode the result (now only returns slashNeeded)
+        bool slashNeeded = abi.decode(result, (bool));
         
         // Verify no slashing is needed
         assertFalse(slashNeeded, "Slashing should not be needed for valid parameters");
-        assertEq(sigStatus, "Valid signature", "Signature should be valid");
-        assertEq(updateStatus, "Valid storage updates", "Storage updates should be valid");
-        assertEq(returnedBlock, blockNumber, "Block number should match");
     }
 
     function testSlashExecVoteInvalidUpdates() public {
@@ -198,31 +227,38 @@ contract VotingContractTest is Test {
         // Create invalid storage updates (just append a byte to make it different)
         bytes memory invalidUpdates = abi.encodePacked(correctUpdates, uint8(1));
         
-        // Generate a valid signature but for the invalid updates
-        bytes memory validSignature = _generateMockSignature(
+        // Create mock parameters for BLS signature verification
+        bytes memory quorumNumbers = new bytes(0);
+        uint32 referenceBlockNumber = uint32(block.number - 1);
+        BLSSignatureChecker.NonSignerStakesAndSignature memory params = _createMockNonSignerStakesAndSignature();
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"));
+        
+        // Generate a valid signature hash for the invalid updates
+        bytes32 validMsgHash = keccak256(abi.encodePacked(
+            votingContract.namespace(),
             blockNumber,
             address(votingContract),
-            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)")),
+            targetFunction,
             invalidUpdates
-        );
+        ));
         
         // Call slashExecVote with invalid updates but matching signature
         bytes memory result = votingContract.slashExecVote(
-            validSignature,
+            validMsgHash,
+            quorumNumbers,
+            referenceBlockNumber,
+            params,
             invalidUpdates,
             blockNumber,
             address(votingContract),
-            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"))
+            targetFunction
         );
         
         // Decode the result
-        (bool slashNeeded, string memory sigStatus, string memory updateStatus, uint256 returnedBlock) = 
-            abi.decode(result, (bool, string, string, uint256));
+        bool slashNeeded = abi.decode(result, (bool));
         
         // Verify slashing is needed because updates are invalid
         assertTrue(slashNeeded, "Slashing should be needed for invalid updates");
-        assertEq(sigStatus, "Valid signature", "Signature should be valid");
-        assertEq(updateStatus, "Invalid storage updates", "Storage updates should be invalid");
     }
 
     function testSlashExecVoteInvalidSignature() public {
@@ -236,31 +272,38 @@ contract VotingContractTest is Test {
         // Get the correct storage updates
         bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
         
-        // Generate an invalid signature (using a different target address)
-        bytes memory invalidSignature = _generateMockSignature(
+        // Create mock parameters for BLS signature verification
+        bytes memory quorumNumbers = new bytes(0);
+        uint32 referenceBlockNumber = uint32(block.number - 1);
+        BLSSignatureChecker.NonSignerStakesAndSignature memory params = _createMockNonSignerStakesAndSignature();
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"));
+        
+        // Generate an invalid message hash (using a different target address)
+        bytes32 invalidMsgHash = keccak256(abi.encodePacked(
+            votingContract.namespace(),
             blockNumber,
             address(0x999), // Different address
-            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)")),
+            targetFunction,
             correctUpdates
-        );
+        ));
         
         // Call slashExecVote with invalid signature but correct updates
         bytes memory result = votingContract.slashExecVote(
-            invalidSignature,
+            invalidMsgHash,
+            quorumNumbers,
+            referenceBlockNumber,
+            params,
             correctUpdates,
             blockNumber,
             address(votingContract), // Correct address in the call
-            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"))
+            targetFunction
         );
         
         // Decode the result
-        (bool slashNeeded, string memory sigStatus, string memory updateStatus, uint256 returnedBlock) = 
-            abi.decode(result, (bool, string, string, uint256));
+        bool slashNeeded = abi.decode(result, (bool));
         
         // Verify slashing is needed because signature is invalid
         assertTrue(slashNeeded, "Slashing should be needed for invalid signature");
-        assertEq(sigStatus, "Invalid signature", "Signature should be invalid");
-        assertEq(updateStatus, "Valid storage updates", "Storage updates should be valid");
     }
 
 }
