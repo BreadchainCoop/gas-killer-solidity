@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
+import "@eigenlayer-middleware/BLSSignatureChecker.sol";
+
 contract VotingContract {
     // List of current voters
     address[] public voters;
 
-    // Tracks our “current” total voting power.
+    // Tracks our "current" total voting power.
     uint256 public currentTotalVotingPower;
     // Tracks if the last vote passed
     bool public lastVotePassed;
+
+    // The BLS signature checker contract
+    BLSSignatureChecker public blsSignatureChecker;
+    // The address of the BLS signature checker contract
+    address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
 
 
     // We store, for each blockNumber, an encoded array of voters that existed at that point.
@@ -62,9 +69,9 @@ contract VotingContract {
     }
 
     /**
-     * @notice Example “executeVote” that recomputes
+     * @notice Example "executeVote" that recomputes
      *         the currentTotalVotingPower for the latest block
-     *         and returns true if it's even, indicating the vote “passes.”
+     *         and returns true if it's even, indicating the vote "passes."
      */
     function executeVote() external returns (bool) {
         // Recompute total from the voters stored at the current block.
@@ -124,24 +131,45 @@ contract VotingContract {
     }
 
 
-    function writeExecuteVote(bytes calldata aggSig, bytes calldata storageUpdates)
+    function writeExecuteVote(
+        bytes32 msgHash,
+        bytes calldata quorumNumbers,
+        uint32 referenceBlockNumber,
+        BLSSignatureChecker.NonSignerStakesAndSignature calldata params,
+        bytes calldata storageUpdates
+    )
         external
         returns (bytes memory)
     {
-        // In a real system, you’d verify aggSig here before applying the updates.
-        // For demonstration, we just parse and apply them.
+        // ------------------------------------------------
+        // 1) Verify aggregator signature & get stake info
+        // ------------------------------------------------
+        (
+            BLSSignatureChecker.QuorumStakeTotals memory stakeTotals,
+            bytes32 signatoryRecordHash
+        ) = blsSignatureChecker.checkSignatures(
+            msgHash,
+            quorumNumbers,
+            referenceBlockNumber,
+            params
+        );
+        // If the signature was invalid, `checkSignatures` should revert.
+        // At this point, aggregator signatures are confirmed valid.
 
+        // ------------------------------------------------
+        // 2) Apply the storage updates
+        // ------------------------------------------------
         uint256 i = 0;
         while (i < storageUpdates.length) {
-            require(i + 1 <= storageUpdates.length, "Invalid data offset");
-            // First byte is the op code
+            // First byte is the operation (must be 0 for SSTORE).
+            require(i + 1 <= storageUpdates.length, "Invalid opcode offset");
             uint8 op = uint8(storageUpdates[i]);
             i++;
 
-            // We only handle SSTORE (op == 0)
-            require(op == 0, "Unsupported operation (only op=0 allowed)");
+            // We only support SSTORE (op = 0) in this example
+            require(op == 0, "Unsupported operation (op must be 0)");
 
-            // Next 32 bytes is the slot
+            // Next 32 bytes is the storage slot
             require(i + 32 <= storageUpdates.length, "Missing slot data");
             uint256 slot;
             assembly {
@@ -157,13 +185,15 @@ contract VotingContract {
             }
             i += 32;
 
-            // Perform the sstore
+            // Perform the SSTORE
             assembly {
                 sstore(slot, val)
             }
         }
 
-        // Return the updated voting power and last vote result
+        // ------------------------------------------------
+        // 3) Return the updated state
+        // ------------------------------------------------
         return abi.encode(currentTotalVotingPower, lastVotePassed);
     }
 
@@ -175,5 +205,51 @@ contract VotingContract {
     // ) external returns (bytes memory) {
 
     // }
+
+    // Test-only version of writeExecuteVote that skips signature verification
+    function writeExecuteVoteTest(bytes calldata storageUpdates)
+        external
+        returns (bytes memory)
+    {
+        // ------------------------------------------------
+        // Skip signature verification and apply storage updates directly
+        // ------------------------------------------------
+        uint256 i = 0;
+        while (i < storageUpdates.length) {
+            // First byte is the operation (must be 0 for SSTORE).
+            require(i + 1 <= storageUpdates.length, "Invalid opcode offset");
+            uint8 op = uint8(storageUpdates[i]);
+            i++;
+
+            // We only support SSTORE (op = 0) in this example
+            require(op == 0, "Unsupported operation (op must be 0)");
+
+            // Next 32 bytes is the storage slot
+            require(i + 32 <= storageUpdates.length, "Missing slot data");
+            uint256 slot;
+            assembly {
+                slot := calldataload(add(storageUpdates.offset, i))
+            }
+            i += 32;
+
+            // Next 32 bytes is the value
+            require(i + 32 <= storageUpdates.length, "Missing value data");
+            uint256 val;
+            assembly {
+                val := calldataload(add(storageUpdates.offset, i))
+            }
+            i += 32;
+
+            // Perform the SSTORE
+            assembly {
+                sstore(slot, val)
+            }
+        }
+
+        // ------------------------------------------------
+        // Return the updated state
+        // ------------------------------------------------
+        return abi.encode(currentTotalVotingPower, lastVotePassed);
+    }
 
 }

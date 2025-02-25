@@ -3,9 +3,12 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import "src/VotingContract.sol";
+import "@eigenlayer-middleware/BLSSignatureChecker.sol";
 
 contract VotingContractTest is Test {
     VotingContract votingContract;
+
+    address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
 
     function setUp() public {
         votingContract = new VotingContract();
@@ -75,8 +78,8 @@ contract VotingContractTest is Test {
         // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(blockNumber);
 
-        // 2) Write these updates on-chain (dummy signature "0x1234" for demonstration)
-        votingContract.writeExecuteVote("0x1234", storageUpdates);
+        // 2) Write these updates on-chain using the test function instead
+        votingContract.writeExecuteVoteTest(storageUpdates);
 
         // 3) Read updated values directly from contract storage
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
@@ -101,8 +104,8 @@ contract VotingContractTest is Test {
         // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(blockNumber);
 
-        // 2) Write these updates on-chain
-        votingContract.writeExecuteVote("0x5678", storageUpdates);
+        // 2) Write these updates on-chain using the test function
+        votingContract.writeExecuteVoteTest(storageUpdates);
 
         // 3) Read updated values directly from contract storage
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
