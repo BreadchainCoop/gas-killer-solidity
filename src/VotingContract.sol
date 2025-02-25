@@ -198,13 +198,63 @@ contract VotingContract {
     }
 
 
-    // function slashExecVote(
-    //     bytes calldata aggSig,
-    //     bytes calldata someBytes,
-    //     uint256 blockNumber
-    // ) external returns (bytes memory) {
-
-    // }
+    /**
+     * @notice Function to verify if a signature is valid and contains correct storage updates
+     * @dev Hashes the input parameters and compares with the signature, also verifies storage updates
+     * @param badSignature The signature to verify
+     * @param storageUpdates The storage updates to verify
+     * @param blockNumber The block number to use for verification
+     * @param targetAddr The address that the signature is for
+     * @param targetFunction The function that the signature targets
+     * @return An encoded result containing verification results
+     */
+    function slashExecVote(
+        bytes calldata badSignature,
+        bytes calldata storageUpdates,
+        uint256 blockNumber,
+        address targetAddr,
+        bytes4 targetFunction
+    ) external view returns (bytes memory) {
+        // Hardcoded namespace matching the Rust constant
+        bytes memory namespace = "_COMMONWARE_AGGREGATION_";
+        
+        // Hash all parameters in specified order to create the message hash
+        bytes32 expectedHash = keccak256(abi.encodePacked(
+            namespace,
+            blockNumber,
+            targetAddr,
+            targetFunction,
+            storageUpdates
+        ));
+        
+        // Convert badSignature to bytes32 for comparison (simplified for demo)
+        bytes32 signatureHash;
+        if (badSignature.length >= 32) {
+            assembly {
+                signatureHash := calldataload(badSignature.offset)
+            }
+        }
+        
+        // Check if signature hash matches expected hash
+        bool signatureValid = (signatureHash == expectedHash);
+        
+        // Calculate what the correct storage updates should be
+        bytes memory correctUpdates = this.operatorExecuteVote(blockNumber);
+        
+        // Check if provided storage updates match the correct ones
+        bool updatesValid = keccak256(storageUpdates) == keccak256(correctUpdates);
+        
+        // Slashing is needed if either the signature is invalid or updates are incorrect
+        bool slashNeeded = !signatureValid || !updatesValid;
+        
+        // Return results
+        return abi.encode(
+            slashNeeded,
+            signatureValid ? "Valid signature" : "Invalid signature",
+            updatesValid ? "Valid storage updates" : "Invalid storage updates",
+            blockNumber
+        );
+    }
 
     // Test-only version of writeExecuteVote that skips signature verification
     function writeExecuteVoteTest(bytes calldata storageUpdates)

@@ -119,4 +119,148 @@ contract VotingContractTest is Test {
         assertFalse(finalVotePassed, "Vote should fail (odd voting power)");
     }
 
+    /**
+     * @notice Helper function to generate a mock signature for testing
+     * @dev Creates a signature by hashing the parameters in the correct order
+     */
+    function _generateMockSignature(
+        uint256 blockNumber,
+        address targetAddr,
+        bytes4 targetFunction,
+        bytes memory storageUpdates
+    ) internal pure returns (bytes memory) {
+        // Hardcoded namespace matching the contract
+        bytes memory namespace = "_COMMONWARE_AGGREGATION_";
+        
+        // Hash all parameters in specified order to create the message hash
+        bytes32 hash = keccak256(abi.encodePacked(
+            namespace,
+            blockNumber,
+            targetAddr,
+            targetFunction,
+            storageUpdates
+        ));
+        
+        // Return the hash as a bytes array (simulating a signature)
+        return abi.encodePacked(hash);
+    }
+
+    function testSlashExecVoteValid() public {
+        // Add a voter to have some state
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+        
+        // Get the current block number
+        uint256 blockNumber = block.number;
+        
+        // Get the correct storage updates
+        bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
+        
+        // Generate a valid mock signature
+        bytes memory validSignature = _generateMockSignature(
+            blockNumber,
+            address(votingContract),
+            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)")),
+            correctUpdates
+        );
+        
+        // Call slashExecVote with valid parameters
+        bytes memory result = votingContract.slashExecVote(
+            validSignature,
+            correctUpdates,
+            blockNumber,
+            address(votingContract),
+            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"))
+        );
+        
+        // Decode the result
+        (bool slashNeeded, string memory sigStatus, string memory updateStatus, uint256 returnedBlock) = 
+            abi.decode(result, (bool, string, string, uint256));
+        
+        // Verify no slashing is needed
+        assertFalse(slashNeeded, "Slashing should not be needed for valid parameters");
+        assertEq(sigStatus, "Valid signature", "Signature should be valid");
+        assertEq(updateStatus, "Valid storage updates", "Storage updates should be valid");
+        assertEq(returnedBlock, blockNumber, "Block number should match");
+    }
+
+    function testSlashExecVoteInvalidUpdates() public {
+        // Add a voter to have some state
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+        
+        // Get the current block number
+        uint256 blockNumber = block.number;
+        
+        // Get the correct storage updates
+        bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
+        
+        // Create invalid storage updates (just append a byte to make it different)
+        bytes memory invalidUpdates = abi.encodePacked(correctUpdates, uint8(1));
+        
+        // Generate a valid signature but for the invalid updates
+        bytes memory validSignature = _generateMockSignature(
+            blockNumber,
+            address(votingContract),
+            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)")),
+            invalidUpdates
+        );
+        
+        // Call slashExecVote with invalid updates but matching signature
+        bytes memory result = votingContract.slashExecVote(
+            validSignature,
+            invalidUpdates,
+            blockNumber,
+            address(votingContract),
+            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"))
+        );
+        
+        // Decode the result
+        (bool slashNeeded, string memory sigStatus, string memory updateStatus, uint256 returnedBlock) = 
+            abi.decode(result, (bool, string, string, uint256));
+        
+        // Verify slashing is needed because updates are invalid
+        assertTrue(slashNeeded, "Slashing should be needed for invalid updates");
+        assertEq(sigStatus, "Valid signature", "Signature should be valid");
+        assertEq(updateStatus, "Invalid storage updates", "Storage updates should be invalid");
+    }
+
+    function testSlashExecVoteInvalidSignature() public {
+        // Add a voter to have some state
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+        
+        // Get the current block number
+        uint256 blockNumber = block.number;
+        
+        // Get the correct storage updates
+        bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
+        
+        // Generate an invalid signature (using a different target address)
+        bytes memory invalidSignature = _generateMockSignature(
+            blockNumber,
+            address(0x999), // Different address
+            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)")),
+            correctUpdates
+        );
+        
+        // Call slashExecVote with invalid signature but correct updates
+        bytes memory result = votingContract.slashExecVote(
+            invalidSignature,
+            correctUpdates,
+            blockNumber,
+            address(votingContract), // Correct address in the call
+            bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"))
+        );
+        
+        // Decode the result
+        (bool slashNeeded, string memory sigStatus, string memory updateStatus, uint256 returnedBlock) = 
+            abi.decode(result, (bool, string, string, uint256));
+        
+        // Verify slashing is needed because signature is invalid
+        assertTrue(slashNeeded, "Slashing should be needed for invalid signature");
+        assertEq(sigStatus, "Invalid signature", "Signature should be invalid");
+        assertEq(updateStatus, "Valid storage updates", "Storage updates should be valid");
+    }
+
 }
