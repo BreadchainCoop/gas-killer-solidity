@@ -140,9 +140,9 @@ contract VotingContract {
 
     function writeExecuteVote(
         bytes32 msgHash,
-        bytes calldata quorumNumbers,
-        uint32 referenceBlockNumber,
-        BLSSignatureChecker.NonSignerStakesAndSignature calldata params,
+        BN254.G1Point memory apk,
+        BN254.G2Point memory apkG2,
+        BN254.G1Point memory sigma,
         bytes calldata storageUpdates,
         uint256 blockNumber,
         address targetAddr,
@@ -160,21 +160,21 @@ contract VotingContract {
             storageUpdates
         ));
         require(expectedHash == msgHash, "Invalid signature");
+        
         // ------------------------------------------------
-        // 1) Verify aggregator signature & get stake info
+        // 1) Verify BLS signature directly using trySignatureAndApkVerification
         // ------------------------------------------------
-        (
-            BLSSignatureChecker.QuorumStakeTotals memory stakeTotals,
-            bytes32 signatoryRecordHash
-        ) = blsSignatureChecker.checkSignatures(
+        (bool pairingSuccessful, bool signatureIsValid) = blsSignatureChecker.trySignatureAndApkVerification(
             msgHash,
-            quorumNumbers,
-            referenceBlockNumber,
-            params
+            apk,
+            apkG2,
+            sigma
         );
-        // If the signature was invalid, `checkSignatures` should revert.
-        // At this point, aggregator signatures are confirmed valid.
-
+        
+        // Check if the signature verification was successful
+        require(pairingSuccessful, "BLS pairing check failed");
+        require(signatureIsValid, "Invalid BLS signature");
+        
         // ------------------------------------------------
         // 2) Apply the storage updates
         // ------------------------------------------------
@@ -221,9 +221,9 @@ contract VotingContract {
      * @notice Function to verify if a signature is valid and contains correct storage updates
      * @dev Hashes the input parameters and compares with the signature, also verifies storage updates
      * @param msgHash The signature hash to verify
-     * @param quorumNumbers The quorum numbers for verification
-     * @param referenceBlockNumber The reference block number for BLS verification
-     * @param params The non-signer stakes and signature data
+     * @param apk The aggregate public key in G1
+     * @param apkG2 The aggregate public key in G2
+     * @param sigma The signature to verify
      * @param storageUpdates The storage updates to verify
      * @param blockNumber The block number to use for verification
      * @param targetAddr The address that the signature is for
@@ -232,9 +232,9 @@ contract VotingContract {
      */
     function slashExecVote(
         bytes32 msgHash,
-        bytes calldata quorumNumbers,
-        uint32 referenceBlockNumber,
-        BLSSignatureChecker.NonSignerStakesAndSignature calldata params,
+        BN254.G1Point memory apk,
+        BN254.G2Point memory apkG2,
+        BN254.G1Point memory sigma,
         bytes calldata storageUpdates,
         uint256 blockNumber,
         address targetAddr,
@@ -257,16 +257,18 @@ contract VotingContract {
             return abi.encode(true); // Slashing needed
         }
 
-        //send the signature to the checker
-        (
-            BLSSignatureChecker.QuorumStakeTotals memory stakeTotals,
-            bytes32 signatoryRecordHash
-        ) = blsSignatureChecker.checkSignatures(
+        // Verify BLS signature directly using trySignatureAndApkVerification
+        (bool pairingSuccessful, bool signatureIsValid) = blsSignatureChecker.trySignatureAndApkVerification(
             msgHash,
-            quorumNumbers,
-            referenceBlockNumber,
-            params
+            apk,
+            apkG2,
+            sigma
         );
+        
+        // Check if the signature verification failed
+        if (!pairingSuccessful || !signatureIsValid) {
+            return abi.encode(true); // Slashing needed
+        }
         
         // Calculate what the correct storage updates should be
         bytes memory correctUpdates = this.operatorExecuteVote(blockNumber);

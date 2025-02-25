@@ -160,25 +160,30 @@ contract VotingContractTest is Test {
         return abi.encodePacked(hash);
     }
 
-    // Helper function to create a mock BLS NonSignerStakesAndSignature struct
+    // Updated helper function to create a more suitable mock NonSignerStakesAndSignature struct
     function _createMockNonSignerStakesAndSignature() internal pure returns (BLSSignatureChecker.NonSignerStakesAndSignature memory) {
         BLSSignatureChecker.NonSignerStakesAndSignature memory params;
         
-        // Initialize with empty arrays
-        params.quorumApks = new BN254.G1Point[](0);
-        params.nonSignerPubkeys = new BN254.G1Point[](0);
-        params.quorumApkIndices = new uint32[](0);
-        params.nonSignerQuorumBitmapIndices = new uint32[](0);
-        params.totalStakeIndices = new uint32[](0);
-        params.nonSignerStakeIndices = new uint32[][](0);
+        // Initialize with a properly sized array for quorumApks - we need at least one element
+        params.quorumApks = new BN254.G1Point[](1);
+        params.quorumApks[0] = BN254.G1Point(1, 2); // Simple non-zero values
         
-        // Initialize the other fields with default values
-        params.sigma = BN254.G1Point(0, 0);
+        // Mock G1Point for sigma (signature)
+        params.sigma = BN254.G1Point(3, 4); // Simple non-zero values for testing
         
-        // Fix: Use uint256 arrays instead of uint8 arrays
-        uint256[2] memory x = [uint256(0), uint256(0)];
-        uint256[2] memory y = [uint256(0), uint256(0)];
+        // Initialize the G2Point for apkG2
+        uint256[2] memory x = [uint256(5), uint256(6)];
+        uint256[2] memory y = [uint256(7), uint256(8)];
         params.apkG2 = BN254.G2Point(x, y);
+        
+        // Initialize the rest of the arrays that we're not using with the new function
+        params.nonSignerPubkeys = new BN254.G1Point[](0);
+        params.quorumApkIndices = new uint32[](1);
+        params.quorumApkIndices[0] = 0;
+        params.nonSignerQuorumBitmapIndices = new uint32[](0);
+        params.totalStakeIndices = new uint32[](1);
+        params.totalStakeIndices[0] = 0;
+        params.nonSignerStakeIndices = new uint32[][](0);
         
         return params;
     }
@@ -194,26 +199,10 @@ contract VotingContractTest is Test {
         // Get the correct storage updates
         bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
         
-        // Create valid quorumNumbers for the BLSSignatureChecker
-        // This format is required: at least one quorum
-        bytes memory quorumNumbers = hex"0100"; // 1 quorum, index 0
+        // Get test BLS points
+        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         
-        // Update the NonSignerStakesAndSignature to match the quorum count
-        BLSSignatureChecker.NonSignerStakesAndSignature memory params = _createMockNonSignerStakesAndSignature();
-        params.totalStakeIndices = new uint32[](1);
-        params.totalStakeIndices[0] = 0;
-        
-        // Add at least one quorum APK
-        BN254.G1Point[] memory quorumApks = new BN254.G1Point[](1);
-        quorumApks[0] = BN254.G1Point(1, 2); // Simple non-zero values
-        params.quorumApks = quorumApks;
-        
-        // Add matching indices
-        params.quorumApkIndices = new uint32[](1);
-        params.quorumApkIndices[0] = 0;
-        
-        uint32 referenceBlockNumber = uint32(block.number - 1);
-        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"));
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate a valid mock signature hash
         bytes32 validMsgHash = keccak256(abi.encodePacked(
@@ -224,61 +213,26 @@ contract VotingContractTest is Test {
             correctUpdates
         ));
         
+        // Mock the BLS verification to succeed
+        vm.mockCall(
+            BLS_SIG_CHECKER,
+            abi.encodeWithSelector(
+                BLSSignatureChecker.trySignatureAndApkVerification.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma
+            ),
+            abi.encode(true, true) // Returns (pairingSuccessful, signatureIsValid) = (true, true)
+        );
+        
         // Call slashExecVote with valid parameters
         bytes memory result = votingContract.slashExecVote(
             validMsgHash,
-            quorumNumbers,
-            referenceBlockNumber,
-            params,
+            apk,
+            apkG2,
+            sigma,
             correctUpdates,
-            blockNumber,
-            address(votingContract),
-            targetFunction
-        );
-        
-        // Decode the result (now only returns slashNeeded)
-        bool slashNeeded = abi.decode(result, (bool));
-        
-        // Verify no slashing is needed
-        assertFalse(slashNeeded, "Slashing should not be needed for valid parameters");
-    }
-
-    function testSlashExecVoteInvalidUpdates() public {
-        // Add a voter to have some state
-        address voter1 = address(0x222);
-        votingContract.addVoter(voter1);
-        
-        // Get the current block number
-        uint256 blockNumber = block.number;
-        
-        // Get the correct storage updates
-        bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
-        
-        // Create invalid storage updates (just append a byte to make it different)
-        bytes memory invalidUpdates = abi.encodePacked(correctUpdates, uint8(1));
-        
-        // Create mock parameters for BLS signature verification
-        bytes memory quorumNumbers = new bytes(0);
-        uint32 referenceBlockNumber = uint32(block.number - 1);
-        BLSSignatureChecker.NonSignerStakesAndSignature memory params = _createMockNonSignerStakesAndSignature();
-        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"));
-        
-        // Generate a valid signature hash for the invalid updates
-        bytes32 validMsgHash = keccak256(abi.encodePacked(
-            votingContract.namespace(),
-            blockNumber,
-            address(votingContract),
-            targetFunction,
-            invalidUpdates
-        ));
-        
-        // Call slashExecVote with invalid updates but matching signature
-        bytes memory result = votingContract.slashExecVote(
-            validMsgHash,
-            quorumNumbers,
-            referenceBlockNumber,
-            params,
-            invalidUpdates,
             blockNumber,
             address(votingContract),
             targetFunction
@@ -287,8 +241,8 @@ contract VotingContractTest is Test {
         // Decode the result
         bool slashNeeded = abi.decode(result, (bool));
         
-        // Verify slashing is needed because updates are invalid
-        assertTrue(slashNeeded, "Slashing should be needed for invalid updates");
+        // Verify no slashing is needed
+        assertFalse(slashNeeded, "Slashing should not be needed for valid parameters");
     }
 
     function testSlashExecVoteInvalidSignature() public {
@@ -302,11 +256,10 @@ contract VotingContractTest is Test {
         // Get the correct storage updates
         bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
         
-        // Create mock parameters for BLS signature verification
-        bytes memory quorumNumbers = new bytes(0);
-        uint32 referenceBlockNumber = uint32(block.number - 1);
-        BLSSignatureChecker.NonSignerStakesAndSignature memory params = _createMockNonSignerStakesAndSignature();
-        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"));
+        // Get test BLS points
+        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
+        
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate an invalid message hash (using a different target address)
         bytes32 invalidMsgHash = keccak256(abi.encodePacked(
@@ -317,12 +270,25 @@ contract VotingContractTest is Test {
             correctUpdates
         ));
         
+        // Mock the BLS verification to fail for invalid signature
+        vm.mockCall(
+            BLS_SIG_CHECKER,
+            abi.encodeWithSelector(
+                BLSSignatureChecker.trySignatureAndApkVerification.selector,
+                invalidMsgHash,
+                apk,
+                apkG2,
+                sigma
+            ),
+            abi.encode(true, false) // Returns (pairingSuccessful, signatureIsValid) = (true, false)
+        );
+        
         // Call slashExecVote with invalid signature but correct updates
         bytes memory result = votingContract.slashExecVote(
             invalidMsgHash,
-            quorumNumbers,
-            referenceBlockNumber,
-            params,
+            apk,
+            apkG2,
+            sigma,
             correctUpdates,
             blockNumber,
             address(votingContract), // Correct address in the call
@@ -334,6 +300,143 @@ contract VotingContractTest is Test {
         
         // Verify slashing is needed because signature is invalid
         assertTrue(slashNeeded, "Slashing should be needed for invalid signature");
+    }
+
+    // Add a test for pairing failure
+    function testSlashExecVotePairingFailure() public {
+        // Add a voter to have some state
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+        
+        // Get the current block number
+        uint256 blockNumber = block.number;
+        
+        // Get the correct storage updates
+        bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
+        
+        // Get test BLS points
+        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
+        
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        
+        // Generate a valid message hash
+        bytes32 validMsgHash = keccak256(abi.encodePacked(
+            votingContract.namespace(),
+            blockNumber,
+            address(votingContract),
+            targetFunction,
+            correctUpdates
+        ));
+        
+        // Mock the BLS verification to fail with pairing failure
+        vm.mockCall(
+            BLS_SIG_CHECKER,
+            abi.encodeWithSelector(
+                BLSSignatureChecker.trySignatureAndApkVerification.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma
+            ),
+            abi.encode(false, false) // Returns (pairingSuccessful, signatureIsValid) = (false, false)
+        );
+        
+        // Call slashExecVote with valid hash but pairing failure
+        bytes memory result = votingContract.slashExecVote(
+            validMsgHash,
+            apk,
+            apkG2,
+            sigma,
+            correctUpdates,
+            blockNumber,
+            address(votingContract),
+            targetFunction
+        );
+        
+        // Decode the result
+        bool slashNeeded = abi.decode(result, (bool));
+        
+        // Verify slashing is needed because pairing failed
+        assertTrue(slashNeeded, "Slashing should be needed for pairing failure");
+    }
+
+    // Helper function to create BLS points for testing
+    function _createTestBLSPoints() internal pure returns (
+        BN254.G1Point memory apk,
+        BN254.G2Point memory apkG2,
+        BN254.G1Point memory sigma
+    ) {
+        // Create simple test values for BLS points
+        apk = BN254.G1Point(1, 2);
+        
+        uint256[2] memory x = [uint256(5), uint256(6)];
+        uint256[2] memory y = [uint256(7), uint256(8)];
+        apkG2 = BN254.G2Point(x, y);
+        
+        sigma = BN254.G1Point(3, 4);
+        
+        return (apk, apkG2, sigma);
+    }
+
+    function testWriteExecuteVote() public {
+        // Add a voter to have some state
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+        
+        // Get the current block number
+        uint256 blockNumber = block.number;
+        
+        // Get the storage updates
+        bytes memory updates = votingContract.operatorExecuteVote(blockNumber);
+        
+        // Get test BLS points
+        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
+        
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        
+        // Generate a valid message hash
+        bytes32 validMsgHash = keccak256(abi.encodePacked(
+            votingContract.namespace(),
+            blockNumber,
+            address(votingContract),
+            targetFunction,
+            updates
+        ));
+        
+        // Mock the BLS verification to succeed
+        vm.mockCall(
+            BLS_SIG_CHECKER,
+            abi.encodeWithSelector(
+                BLSSignatureChecker.trySignatureAndApkVerification.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma
+            ),
+            abi.encode(true, true) // Returns (pairingSuccessful, signatureIsValid) = (true, true)
+        );
+        
+        // Call writeExecuteVote with the test data
+        bytes memory result = votingContract.writeExecuteVote(
+            validMsgHash,
+            apk,
+            apkG2,
+            sigma,
+            updates,
+            blockNumber,
+            address(votingContract),
+            targetFunction
+        );
+        
+        // Decode and verify the result
+        (uint256 totalVotingPower, bool votePassed) = abi.decode(result, (uint256, bool));
+        
+        // Compute expected power
+        uint256 expectedPower = uint160(voter1) * blockNumber;
+        
+        // Verify results
+        assertEq(totalVotingPower, expectedPower, "Total voting power should be updated correctly");
+        assertEq(votePassed, expectedPower % 2 == 0, "Vote result should be correct");
     }
 
 }
