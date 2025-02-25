@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import "@eigenlayer-middleware/BLSSignatureChecker.sol";
 
+import "./Payments.sol";
+
 contract VotingContract {
     // List of current voters
     address[] public voters;
@@ -11,6 +13,8 @@ contract VotingContract {
     uint256 public currentTotalVotingPower;
     // Tracks if the last vote passed
     bool public lastVotePassed;
+
+    PaymentContract public paymentContract;
 
     // The BLS signature checker contract
     BLSSignatureChecker public blsSignatureChecker;
@@ -23,9 +27,10 @@ contract VotingContract {
     // We store, for each blockNumber, an encoded array of voters that existed at that point.
     mapping(uint256 => bytes) public votersArrayStorage;
     
-    constructor() {
+    constructor(address _paymentContract) {
         // Initialize the BLS signature checker
         blsSignatureChecker = BLSSignatureChecker(BLS_SIG_CHECKER);
+        paymentContract = PaymentContract(_paymentContract);
     }
 
     /**
@@ -149,8 +154,15 @@ contract VotingContract {
         bytes4 targetFunction
     )
         external
+        payable
         returns (bytes memory)
     {
+        // Check required ETH payment upfront
+        require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
+        
+        // Forward the 0.1 ETH to the PaymentContract
+        paymentContract.deposit{value: msg.value}();
+        
         //check that those 4 with namespace match the hash
         bytes32 expectedHash = keccak256(abi.encodePacked(
             namespace,
@@ -286,8 +298,14 @@ contract VotingContract {
     // Test-only version of writeExecuteVote that skips signature verification
     function writeExecuteVoteTest(bytes calldata storageUpdates)
         external
+        payable
         returns (bytes memory)
     {
+        require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
+
+        // Forward the 0.1 ETH to the PaymentContract
+        paymentContract.deposit{value: msg.value}();
+
         // ------------------------------------------------
         // Skip signature verification and apply storage updates directly
         // ------------------------------------------------

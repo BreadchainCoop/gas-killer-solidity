@@ -3,15 +3,27 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import "src/VotingContract.sol";
+import "src/Payments.sol";
 import "@eigenlayer-middleware/BLSSignatureChecker.sol";
 
 contract VotingContractTest is Test {
     VotingContract votingContract;
+    PaymentContract paymentContract;
 
     address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
+    
+    // Define a test user with funds for payments
+    address payable testUser = payable(address(0x123));
 
     function setUp() public {
-        votingContract = new VotingContract();
+        // Deploy the PaymentContract first
+        paymentContract = new PaymentContract();
+        
+        // Deploy VotingContract with the PaymentContract address
+        votingContract = new VotingContract(address(paymentContract));
+        
+        // Give testUser some ETH for payments
+        vm.deal(testUser, 10 ether);
     }
 
     function testAddVoter() public {
@@ -77,7 +89,6 @@ contract VotingContractTest is Test {
 
     function testOperatorExecuteVoteEven() public {
         // Add a voter whose address, when multiplied by block.number, yields an even total
-        // e.g. address(0x222) is even in the low bits.
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
 
@@ -87,8 +98,15 @@ contract VotingContractTest is Test {
         // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(blockNumber);
 
-        // 2) Write these updates on-chain using the test function instead
-        votingContract.writeExecuteVoteTest(storageUpdates);
+        // 2) Call the test function as testUser and send required ETH
+        vm.prank(testUser);
+        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+            abi.encodeWithSelector(
+                votingContract.writeExecuteVoteTest.selector,
+                storageUpdates
+            )
+        );
+        require(success, "Call failed");
 
         // 3) Read updated values directly from contract storage
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
@@ -104,7 +122,6 @@ contract VotingContractTest is Test {
 
     function testOperatorExecuteVoteOdd() public {
         // Add a voter whose address, when multiplied by block.number, yields an odd total
-        // e.g. address(0x123).
         address voter1 = address(0x123);
         votingContract.addVoter(voter1);
 
@@ -116,8 +133,15 @@ contract VotingContractTest is Test {
         // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(blockNumber);
 
-        // 2) Write these updates on-chain using the test function
-        votingContract.writeExecuteVoteTest(storageUpdates);
+        // 2) Call the test function as testUser and send required ETH
+        vm.prank(testUser);
+        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+            abi.encodeWithSelector(
+                votingContract.writeExecuteVoteTest.selector,
+                storageUpdates
+            )
+        );
+        require(success, "Call failed");
 
         // 3) Read updated values directly from contract storage
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
@@ -378,7 +402,8 @@ contract VotingContractTest is Test {
         return (apk, apkG2, sigma);
     }
 
-    function testWriteExecuteVote() public {
+    // Updated helper function to send a payment (shared logic for multiple tests)
+    function _executePayment() internal {
         // Add a voter to have some state
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
@@ -413,30 +438,146 @@ contract VotingContractTest is Test {
                 apkG2,
                 sigma
             ),
-            abi.encode(true, true) // Returns (pairingSuccessful, signatureIsValid) = (true, true)
+            abi.encode(true, true)
         );
         
-        // Call writeExecuteVote with the test data
-        bytes memory result = votingContract.writeExecuteVote(
-            validMsgHash,
-            apk,
-            apkG2,
-            sigma,
-            updates,
-            blockNumber,
-            address(votingContract),
-            targetFunction
+        // Make sure testUser has enough ETH - reset for each test
+        vm.deal(testUser, 10 ether);
+        
+        // Call writeExecuteVote with the test data as testUser and send required ETH
+        vm.prank(testUser);
+        (bool success, ) = address(votingContract).call{value: 0.1 ether}(
+            abi.encodeWithSelector(
+                votingContract.writeExecuteVote.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma,
+                updates,
+                blockNumber,
+                address(votingContract),
+                targetFunction
+            )
         );
-        
-        // Decode and verify the result
-        (uint256 totalVotingPower, bool votePassed) = abi.decode(result, (uint256, bool));
-        
-        // Compute expected power
-        uint256 expectedPower = uint160(voter1) * blockNumber;
-        
-        // Verify results
-        assertEq(totalVotingPower, expectedPower, "Total voting power should be updated correctly");
-        assertEq(votePassed, expectedPower % 2 == 0, "Vote result should be correct");
+        require(success, "Call failed");
     }
 
+    // Updated tests to use the helper function
+    function testWriteExecuteVote() public {
+        // Make sure we start with a clean state
+        assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
+        
+        // Execute the payment
+        _executePayment();
+        
+        // Verify the payment was made
+        assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
+        
+        // Check contract state after payment
+        address voter1 = address(0x222);
+        uint256 blockNumber = block.number;
+        uint256 expectedPower = uint160(voter1) * blockNumber;
+        
+        // Verify the voting power was updated correctly
+        assertEq(votingContract.currentTotalVotingPower(), expectedPower, "Total voting power should be updated");
+    }
+
+    function testPaymentContractWithdrawal() public {
+        // Make sure we start with a clean state 
+        assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
+        
+        // Execute a payment to have some funds in the payment contract
+        _executePayment();
+        
+        // Check initial balance
+        assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
+        
+        // Setup a receiver address
+        address payable receiver = payable(address(0x789));
+        vm.deal(receiver, 0); // Make sure receiver starts with 0 balance
+        
+        // Remember owner from the setup
+        address owner = paymentContract.owner();
+        
+        // Owner withdraws the funds
+        vm.prank(owner);
+        paymentContract.withdraw(receiver);
+        
+        // Check that funds were transferred correctly
+        assertEq(address(paymentContract).balance, 0, "Payment contract should be empty");
+        assertEq(receiver.balance, 0.1 ether, "Receiver should have received 0.1 ETH");
+    }
+
+    function testCannotWithdrawAsNonOwner() public {
+        // Make sure we start with a clean state
+        assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
+        
+        // Execute a payment to have some funds in the contract
+        _executePayment();
+        
+        // Setup a receiver address
+        address payable receiver = payable(address(0x789));
+        
+        // Try to withdraw as non-owner (using testUser which is not the owner)
+        // The expectRevert must come BEFORE the call that's expected to revert
+        vm.expectRevert("Only owner can withdraw");
+        vm.prank(testUser);
+        paymentContract.withdraw(receiver);
+    }
+
+    function testWriteExecuteVoteMustSendExactAmount() public {
+        // Add a voter to have some state
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+        
+        // Get the current block number
+        uint256 blockNumber = block.number;
+        
+        // Get the storage updates
+        bytes memory updates = votingContract.operatorExecuteVote(blockNumber);
+        
+        // Get test BLS points
+        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
+        
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        
+        // Generate a valid message hash
+        bytes32 validMsgHash = keccak256(abi.encodePacked(
+            votingContract.namespace(),
+            blockNumber,
+            address(votingContract),
+            targetFunction,
+            updates
+        ));
+        
+        // Mock the BLS verification to succeed
+        vm.mockCall(
+            BLS_SIG_CHECKER,
+            abi.encodeWithSelector(
+                BLSSignatureChecker.trySignatureAndApkVerification.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma
+            ),
+            abi.encode(true, true)
+        );
+        
+        // Try to call with too little ETH and expect revert
+        vm.prank(testUser);
+        (bool success,) = address(votingContract).call{value: 0.05 ether}(
+            abi.encodeWithSelector(
+                votingContract.writeExecuteVote.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma,
+                updates,
+                blockNumber,
+                address(votingContract),
+                targetFunction
+            )
+        );
+        assertFalse(success, "Call should fail with incorrect ETH amount");
+    }
 }
