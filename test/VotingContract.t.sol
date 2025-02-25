@@ -52,10 +52,19 @@ contract VotingContractTest is Test {
     }
 
     function testExecuteVoteOddPower() public {
-        address voter1 = address(0x123); // 0x123 is odd, so total power should be odd
+        // Add a voter whose address, when multiplied by block.number, yields an odd total
+        address voter1 = address(0x123);
         votingContract.addVoter(voter1);
         
+        // Make sure the block number is odd to ensure odd voting power
+        vm.roll(block.number | 1); // Force odd block number
+        
         bool votePassed = votingContract.executeVote();
+        
+        // Verify the voting power is actually odd
+        uint256 votingPower = votingContract.getCurrentTotalVotingPower(block.number);
+        assertTrue(votingPower % 2 == 1, "Total voting power should be odd");
+        
         assertFalse(votePassed, "Vote should fail when total voting power is odd");
     }
 
@@ -99,6 +108,9 @@ contract VotingContractTest is Test {
         address voter1 = address(0x123);
         votingContract.addVoter(voter1);
 
+        // Make sure the block number is odd to ensure odd voting power
+        vm.roll(block.number | 1); // Force odd block number
+        
         uint256 blockNumber = block.number;
 
         // 1) Simulate off-chain aggregator: obtain the storage update payload
@@ -113,6 +125,9 @@ contract VotingContractTest is Test {
 
         // Compute expected voting power
         uint256 expectedPower = (uint160(voter1) * blockNumber);
+        
+        // Verify the voting power is actually odd
+        assertTrue(expectedPower % 2 == 1, "Expected voting power should be odd");
 
         // Check final results
         assertEq(finalVotingPower, expectedPower, "Final voting power should match the computed odd sum");
@@ -179,10 +194,25 @@ contract VotingContractTest is Test {
         // Get the correct storage updates
         bytes memory correctUpdates = votingContract.operatorExecuteVote(blockNumber);
         
-        // Create mock parameters for BLS signature verification
-        bytes memory quorumNumbers = new bytes(0);
-        uint32 referenceBlockNumber = uint32(block.number - 1);
+        // Create valid quorumNumbers for the BLSSignatureChecker
+        // This format is required: at least one quorum
+        bytes memory quorumNumbers = hex"0100"; // 1 quorum, index 0
+        
+        // Update the NonSignerStakesAndSignature to match the quorum count
         BLSSignatureChecker.NonSignerStakesAndSignature memory params = _createMockNonSignerStakesAndSignature();
+        params.totalStakeIndices = new uint32[](1);
+        params.totalStakeIndices[0] = 0;
+        
+        // Add at least one quorum APK
+        BN254.G1Point[] memory quorumApks = new BN254.G1Point[](1);
+        quorumApks[0] = BN254.G1Point(1, 2); // Simple non-zero values
+        params.quorumApks = quorumApks;
+        
+        // Add matching indices
+        params.quorumApkIndices = new uint32[](1);
+        params.quorumApkIndices[0] = 0;
+        
+        uint32 referenceBlockNumber = uint32(block.number - 1);
         bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,bytes,uint32,BLSSignatureChecker.NonSignerStakesAndSignature,bytes)"));
         
         // Generate a valid mock signature hash
