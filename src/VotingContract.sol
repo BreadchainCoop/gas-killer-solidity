@@ -2,10 +2,10 @@
 pragma solidity ^0.8.0;
 
 import "@eigenlayer-middleware/BLSSignatureChecker.sol";
-
 import "./Payments.sol";
+import "./StateTracker.sol";
 
-contract VotingContract {
+contract VotingContract is StateTracker {
     // List of current voters
     address[] public voters;
 
@@ -24,26 +24,30 @@ contract VotingContract {
     // Hardcoded namespace matching the Rust constant
     bytes public constant namespace = "_COMMONWARE_AGGREGATION_";
 
-    // We store, for each blockNumber, an encoded array of voters that existed at that point.
+    // We store, for each transition index, an encoded array of voters that existed at that index.
     mapping(uint256 => bytes) public votersArrayStorage;
+
+    // add revert
+    error InvalidTransitionIndex();
     
     constructor(address _paymentContract) {
         // Initialize the BLS signature checker
         blsSignatureChecker = BLSSignatureChecker(BLS_SIG_CHECKER);
         paymentContract = PaymentContract(_paymentContract);
         voters.push(msg.sender);
-        votersArrayStorage[block.number] = abi.encode(voters);
+        assembly { sstore(_stateTrackerSlot, add(0x01, sload(_stateTrackerSlot))) }
+        votersArrayStorage[stateTransitionCount()] = abi.encode(voters);
     }
 
     /**
      * @notice Adds a new voter and saves the updated voters array
-     *         into the mapping under the current block number.
+     *         into the mapping under the current transition index.
      */
-    function addVoter(address _voter) external {
+    function addVoter(address _voter) external trackState {
         voters.push(_voter);
-        // Encode and store the updated voters array for this block.
+        // Encode and store the updated voters array for this index.
         bytes memory encodedVoters = abi.encode(voters);
-        votersArrayStorage[block.number] = encodedVoters;
+        votersArrayStorage[stateTransitionCount()] = encodedVoters;
     }
 
     /**
@@ -56,45 +60,43 @@ contract VotingContract {
     }
 
     /**
-     * @notice Given a block number, decodes the voters array that was stored at that block
+     * @notice Given a transition index, decodes the voters array that was stored at that index
      *         and computes the total voting power:
-     *         sum( uint160(voterAddress) * blockNumber ).
+     *         sum( uint160(voterAddress) * transitionIndex ).
      */
-    function getCurrentTotalVotingPower(uint256 _blockNumber)
+    function getCurrentTotalVotingPower(uint256 transitionIndex)
         public
         view
         returns (uint256)
     {
-        bytes memory storedArray = votersArrayStorage[_blockNumber];
+        bytes memory storedArray = votersArrayStorage[transitionIndex];
 
-        uint256 blockNum = _blockNumber;
-        while (storedArray.length == 0 && blockNum > 0) {
-            if (blockNum == 0) {
+        uint256 transNum = transitionIndex;
+        while (storedArray.length == 0 && transNum > 0) {
+            if (transNum == 0) {
                 return 0;
             }
-            blockNum--;
-            storedArray = votersArrayStorage[blockNum];
+            transNum--;
+            storedArray = votersArrayStorage[transNum];
         }
 
         // Decode back the array of addresses
-        address[] memory votersAtBlock = abi.decode(storedArray, (address[]));
+        address[] memory votersAtIndex = abi.decode(storedArray, (address[]));
 
         uint256 sumVal = 0;
-        for (uint256 i = 0; i < votersAtBlock.length; i++) {
-            // Multiply each address (as uint160) by the blockNumber
-            sumVal += (uint160(votersAtBlock[i]) * _blockNumber);
+        for (uint256 i = 0; i < votersAtIndex.length; i++) {
+            sumVal += (uint160(votersAtIndex[i]) * transitionIndex);
         }
         return sumVal;
     }
 
     /**
      * @notice Example "executeVote" that recomputes
-     *         the currentTotalVotingPower for the latest block
+     *         the currentTotalVotingPower for the latest transition index
      *         and returns true if it's even, indicating the vote "passes."
      */
-    function executeVote() external returns (bool) {
-        // Recompute total from the voters stored at the current block.
-        uint256 newVotingPower = getCurrentTotalVotingPower(block.number);
+    function executeVote() external trackState returns (bool) {
+        uint256 newVotingPower = getCurrentTotalVotingPower(stateTransitionCount());
 
         // Update the current total voting power.
         currentTotalVotingPower = newVotingPower;
@@ -113,14 +115,13 @@ contract VotingContract {
     //  THREE ADDITIONAL EXECUTE/SLASH FUNCTIONS
     // ------------------------------------------------------------------------
 
-
-    function operatorExecuteVote(uint256 blockNumber)
+    function operatorExecuteVote(uint256 transitionIndex)
         external
         view
         returns (bytes memory)
     {
         // 1) Calculate new voting power
-        uint256 newVotingPower = getCurrentTotalVotingPower(blockNumber);
+        uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex);
 
         // 2) Determine if vote passes (true if even)
         bool votePassed = (newVotingPower % 2 == 0);
@@ -132,23 +133,20 @@ contract VotingContract {
         //   - 1 byte: 0 => indicates "SSTORE"
         //   - 32 bytes: slot index
         //   - 32 bytes: value
-        //
-        // We do that twice: once for currentTotalVotingPower, once for lastVotePassed.
         
         bytes memory encoded = abi.encodePacked(
             // SSTORE currentTotalVotingPower
-            uint8(0),              // op = 0 => SSTORE
-            uint256(1),            // slot = 1
-            newVotingPower,        // value
+            uint8(0),
+            uint256(1),
+            newVotingPower,
             // SSTORE lastVotePassed
-            uint8(0),              // op = 0 => SSTORE
-            uint256(2),            // slot = 2
-            votePassed ? uint256(1) : uint256(0) // value
+            uint8(0),
+            uint256(2),
+            votePassed ? uint256(1) : uint256(0)
         );
 
         return encoded;
     }
-
 
     function writeExecuteVote(
         bytes32 msgHash,
@@ -156,14 +154,16 @@ contract VotingContract {
         BN254.G2Point memory apkG2,
         BN254.G1Point memory sigma,
         bytes calldata storageUpdates,
-        uint256 blockNumber,
+        uint256 transitionIndex,
         address targetAddr,
         bytes4 targetFunction
     )
         external
         payable
+        trackState
         returns (bytes memory)
     {
+        require(transitionIndex+1 == stateTransitionCount(), InvalidTransitionIndex());
         // Check required ETH payment upfront
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
         
@@ -173,7 +173,7 @@ contract VotingContract {
         //check that those 4 with namespace match the hash
         bytes32 expectedHash = keccak256(abi.encodePacked(
             namespace,
-            blockNumber,
+            transitionIndex,
             targetAddr,
             targetFunction,
             storageUpdates
@@ -235,7 +235,6 @@ contract VotingContract {
         return abi.encode(currentTotalVotingPower, lastVotePassed);
     }
 
-
     /**
      * @notice Function to verify if a signature is valid and contains correct storage updates
      * @dev Hashes the input parameters and compares with the signature, also verifies storage updates
@@ -244,7 +243,7 @@ contract VotingContract {
      * @param apkG2 The aggregate public key in G2
      * @param sigma The signature to verify
      * @param storageUpdates The storage updates to verify
-     * @param blockNumber The block number to use for verification
+     * @param transitionIndex The transition index to use for verification
      * @param targetAddr The address that the signature is for
      * @param targetFunction The function that the signature targets
      * @return An encoded result containing verification results
@@ -255,14 +254,14 @@ contract VotingContract {
         BN254.G2Point memory apkG2,
         BN254.G1Point memory sigma,
         bytes calldata storageUpdates,
-        uint256 blockNumber,
+        uint256 transitionIndex,
         address targetAddr,
         bytes4 targetFunction
-    ) external view returns (bytes memory) {
+    ) external trackState returns (bytes memory) {
         // Hash all parameters in specified order to create the message hash
         bytes32 expectedHash = keccak256(abi.encodePacked(
             namespace,
-            blockNumber,
+            transitionIndex,
             targetAddr,
             targetFunction,
             storageUpdates
@@ -290,7 +289,7 @@ contract VotingContract {
         }
         
         // Calculate what the correct storage updates should be
-        bytes memory correctUpdates = this.operatorExecuteVote(blockNumber);
+        bytes memory correctUpdates = this.operatorExecuteVote(transitionIndex);
         
         // Check if provided storage updates match the correct ones
         bool updatesValid = keccak256(storageUpdates) == keccak256(correctUpdates);
@@ -306,6 +305,7 @@ contract VotingContract {
     function writeExecuteVoteTest(bytes calldata storageUpdates)
         external
         payable
+        trackState
         returns (bytes memory)
     {
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");

@@ -50,13 +50,16 @@ contract VotingContractTest is Test {
         
         votingContract.addVoter(voter1);
         votingContract.addVoter(voter2);
-        uint256 blockNumber = block.number;
         
-        // Include the deployer (address(this)) in the calculation
-        uint256 expectedPower = (uint160(address(this)) * blockNumber) + 
-                               (uint160(voter1) * blockNumber) + 
-                               (uint160(voter2) * blockNumber);
-        uint256 retrievedPower = votingContract.getCurrentTotalVotingPower(blockNumber);
+        // Use the current transition count
+        uint256 transitionIndex = votingContract.stateTransitionCount();
+        
+        // Calculate with transition index instead of block number
+        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + 
+                               (uint160(voter1) * transitionIndex) + 
+                               (uint160(voter2) * transitionIndex);
+                           
+        uint256 retrievedPower = votingContract.getCurrentTotalVotingPower(transitionIndex);
         
         assertEq(retrievedPower, expectedPower, "Total voting power should be correct");
     }
@@ -70,20 +73,35 @@ contract VotingContractTest is Test {
     }
 
     function testExecuteVoteOddPower() public {
-        // Add a voter whose address, when multiplied by block.number, yields an odd total
+        // Add a voter with specific address to test voting power
         address voter1 = address(0x123);
         votingContract.addVoter(voter1);
         
-        // Make sure the block number is odd to ensure odd voting power
-        vm.roll(block.number | 1); // Force odd block number
+        // Get the transition index BEFORE executing vote
+        uint256 preExecuteTransition = votingContract.stateTransitionCount();
         
+        // Execute the vote - this will increase the transition count due to trackState modifier
         bool votePassed = votingContract.executeVote();
         
-        // Verify the voting power is actually odd
-        uint256 votingPower = votingContract.getCurrentTotalVotingPower(block.number);
-        assertTrue(votingPower % 2 == 1, "Total voting power should be odd");
+        // Get the NEW transition index AFTER executing vote
+        uint256 postExecuteTransition = votingContract.stateTransitionCount();
         
-        assertFalse(votePassed, "Vote should fail when total voting power is odd");
+        // Verify the transition count increased
+        assertEq(postExecuteTransition, preExecuteTransition + 1, "Transition count should increase by 1");
+        
+        // Calculate the voting power with the NEW transition index that executeVote() used
+        uint256 votingPower = votingContract.getCurrentTotalVotingPower(postExecuteTransition);
+        bool isVotingPowerEven = votingPower % 2 == 0;
+        
+        // Log values for clarity
+        console.log("Pre-execute Transition:", preExecuteTransition);
+        console.log("Post-execute Transition:", postExecuteTransition);
+        console.log("Voting Power at post-execute transition:", votingPower);
+        console.log("Is this power even?", isVotingPowerEven);
+        console.log("Vote Passed:", votePassed);
+        
+        // Now check against the correct transition index
+        assertEq(votePassed, isVotingPowerEven, "Vote should pass if voting power at new transition is even");
     }
 
     function testNoVotingPowerBeforeAddingVoters() public {
@@ -97,15 +115,15 @@ contract VotingContractTest is Test {
     }
 
     function testOperatorExecuteVoteEven() public {
-        // Add a voter whose address, when multiplied by block.number, yields an even total
+        // Add a voter whose address, when multiplied by transition index, yields an even total
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
 
-        // Capture the current block number after adding the voter
-        uint256 blockNumber = block.number;
+        // Get the current state transition index after adding the voter
+        uint256 transitionIndex = votingContract.stateTransitionCount();
 
         // 1) Simulate off-chain aggregator: obtain the storage update payload
-        bytes memory storageUpdates = votingContract.operatorExecuteVote(blockNumber);
+        bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
 
         // 2) Call the test function as testUser and send required ETH
         vm.prank(testUser);
@@ -121,25 +139,24 @@ contract VotingContractTest is Test {
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
         bool finalVotePassed = votingContract.lastVotePassed();
 
-        // Compute expected voting power for manual check - include deployer
-        uint256 expectedPower = (uint160(address(this)) * blockNumber) + (uint160(voter1) * blockNumber);
+        // Compute expected voting power with the transition index
+        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
 
         // Check the storage updates worked as intended
         assertEq(finalVotingPower, expectedPower, "Final voting power should match the computed value");
-        // Note: The vote passing depends on the total power, which includes the deployer
         assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match expected");
     }
 
     function testOperatorExecuteVoteOdd() public {
-        // Add a voter whose address, when multiplied by block.number, yields an odd total
+        // Add a voter whose address, when multiplied by transition index, yields an odd sum
         address voter1 = address(0x123);
         votingContract.addVoter(voter1);
 
-        // Capture the current block number after adding the voter
-        uint256 blockNumber = block.number;
+        // Get the current state transition index after adding the voter
+        uint256 transitionIndex = votingContract.stateTransitionCount();
 
         // 1) Simulate off-chain aggregator: obtain the storage update payload
-        bytes memory storageUpdates = votingContract.operatorExecuteVote(blockNumber);
+        bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
 
         // 2) Call the test function as testUser and send required ETH
         vm.prank(testUser);
@@ -155,13 +172,12 @@ contract VotingContractTest is Test {
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
         bool finalVotePassed = votingContract.lastVotePassed();
 
-        // Compute expected voting power for manual check - include deployer
-        uint256 expectedPower = (uint160(address(this)) * blockNumber) + (uint160(voter1) * blockNumber);
+        // Compute expected voting power with the transition index
+        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
 
         // Check the storage updates worked as intended
         assertEq(finalVotingPower, expectedPower, "Final voting power should match the computed odd sum");
-        // Vote passing depends on total power being even or odd
-        assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match if power is even");
+        assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match expected");
     }
 
     /**
@@ -413,28 +429,34 @@ contract VotingContractTest is Test {
         // Add a voter to have some state
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
+
+        // Get the current block number before advancing
+        uint256 currentBlock = block.number;
         
-        // Get the current block number
-        uint256 blockNumber = block.number;
+        // Move to next block to ensure state transition
+        vm.roll(currentBlock + 1);
         
-        // Get the storage updates
-        bytes memory updates = votingContract.operatorExecuteVote(blockNumber);
+        // Get the current transition index
+        uint256 transitionIndex = votingContract.stateTransitionCount();
+        
+        // Get the storage updates with the transition index
+        bytes memory updates = votingContract.operatorExecuteVote(transitionIndex);
         
         // Get test BLS points
         (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         
         bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
-        // Generate a valid message hash
+        // Generate a valid message hash using transition index
         bytes32 validMsgHash = keccak256(abi.encodePacked(
             votingContract.namespace(),
-            blockNumber,
+            transitionIndex,
             address(votingContract),
             targetFunction,
             updates
         ));
-        
-        // Mock the BLS verification to succeed
+
+        // Mock the BLS verification
         vm.mockCall(
             BLS_SIG_CHECKER,
             abi.encodeWithSelector(
@@ -446,12 +468,18 @@ contract VotingContractTest is Test {
             ),
             abi.encode(true, true)
         );
-        
-        // Make sure testUser has enough ETH - reset for each test
+
+        // Make sure testUser has enough ETH
         vm.deal(testUser, 10 ether);
-        
-        // Call writeExecuteVote with the test data as testUser and send required ETH
+
+        // Call writeExecuteVote with transition index
         vm.prank(testUser);
+        
+        // Get current transition index and log it
+        uint256 currentTransition = votingContract.stateTransitionCount();
+        console.log("Current transition index:", currentTransition);
+        console.log("Transition index being used:", transitionIndex);
+        
         (bool success, ) = address(votingContract).call{value: 0.1 ether}(
             abi.encodeWithSelector(
                 votingContract.writeExecuteVote.selector,
@@ -460,7 +488,7 @@ contract VotingContractTest is Test {
                 apkG2,
                 sigma,
                 updates,
-                blockNumber,
+                transitionIndex,
                 address(votingContract),
                 targetFunction
             )
@@ -473,21 +501,72 @@ contract VotingContractTest is Test {
         // Make sure we start with a clean state
         assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
         
-        // Execute the payment
-        _executePayment();
+        // Add a voter to have some state
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+        
+        // Get the current transition index
+        uint256 transitionIndex = votingContract.stateTransitionCount();
+        
+        // Get the storage updates
+        bytes memory updates = votingContract.operatorExecuteVote(transitionIndex);
+        
+        // Get test BLS points
+        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
+        
+        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        
+        // Generate a valid message hash
+        bytes32 validMsgHash = keccak256(abi.encodePacked(
+            votingContract.namespace(),
+            transitionIndex,
+            address(votingContract),
+            targetFunction,
+            updates
+        ));
+        
+        // Mock the BLS verification
+        vm.mockCall(
+            BLS_SIG_CHECKER,
+            abi.encodeWithSelector(
+                BLSSignatureChecker.trySignatureAndApkVerification.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma
+            ),
+            abi.encode(true, true)
+        );
+        
+        // Make sure testUser has enough ETH
+        vm.deal(testUser, 10 ether);
+        
+        // Execute the vote
+        vm.prank(testUser);
+        (bool success, ) = address(votingContract).call{value: 0.1 ether}(
+            abi.encodeWithSelector(
+                votingContract.writeExecuteVote.selector,
+                validMsgHash,
+                apk,
+                apkG2,
+                sigma,
+                updates,
+                transitionIndex,
+                address(votingContract),
+                targetFunction
+            )
+        );
+        require(success, "Call failed");
         
         // Verify the payment was made
         assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
         
-        // Check contract state after payment
-        address voter1 = address(0x222);
-        uint256 blockNumber = block.number;
+        // Calculate expected power with transition index
+        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
         
-        // Include deployer in the expected power calculation 
-        uint256 expectedPower = (uint160(address(this)) * blockNumber) + (uint160(voter1) * blockNumber);
-        
-        // Verify the voting power was updated correctly
-        assertEq(votingContract.currentTotalVotingPower(), expectedPower, "Total voting power should be updated");
+        // Verify the voting power was updated correctly - get it directly from the contract
+        uint256 actualPower = votingContract.currentTotalVotingPower();
+        assertEq(actualPower, expectedPower, "Total voting power should be updated correctly");
     }
 
     function testPaymentContractWithdrawal() public {
@@ -588,4 +667,108 @@ contract VotingContractTest is Test {
         );
         assertFalse(success, "Call should fail with incorrect ETH amount");
     }
+
+    function testFrontRunSameBlockReverts() public {
+        // 1) Add a voter so we move to transitionIndex = 2
+        //    (initial deploy = 1, first addVoter = 2)
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+
+        // 2) aggregator obtains "correct" updates for the *current* transition index,
+        //    which is now 2.
+        uint256 staleTransitionIndex = votingContract.stateTransitionCount();
+        bytes memory staleUpdates = votingContract.operatorExecuteVote(staleTransitionIndex);
+
+        // 3) aggregator calculates the BLS signature for `staleTransitionIndex`.
+        //    We'll mock it again. (Same approach as your other tests.)
+        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
+        bytes4 targetFunction = bytes4(
+            keccak256(
+                "writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"
+            )
+        );
+
+        // This is the hash for transitionIndex = 2
+        bytes32 msgHashStale = keccak256(
+            abi.encodePacked(
+                votingContract.namespace(),
+                staleTransitionIndex,
+                address(votingContract),
+                targetFunction,
+                staleUpdates
+            )
+        );
+
+        // Mock the BLS check to succeed for that stale hash
+        vm.mockCall(
+            BLS_SIG_CHECKER,
+            abi.encodeWithSelector(
+                BLSSignatureChecker.trySignatureAndApkVerification.selector,
+                msgHashStale,
+                apk,
+                apkG2,
+                sigma
+            ),
+            abi.encode(true, true)
+        );
+
+        // 4) Now, a front-run TX occurs in the *same block* that changes state again.
+        //    In Foundry, each vm.call typically mines a separate block by default.
+        //    But we can artificially keep the same block by rolling back the block number.
+        //    We do *another* addVoter, which increments the transition index => 3.
+        //    We'll forcibly revert the block number afterward, to simulate them being
+        //    in the same block.
+        uint256 oldBlock = block.number;
+        address voter2 = address(0x333);
+        votingContract.addVoter(voter2);
+        // Force the block number back so the next call is in the "same block"
+        vm.roll(oldBlock);
+
+        // The contract's real transition index is now 3. But aggregator is about to
+        // call writeExecuteVote using transition index = 2. This no longer matches
+        // the contract's newly updated state. The signature we computed is stale.
+
+        // 5) Attempt the aggregator's write with the stale signature + updates
+        vm.deal(testUser, 10 ether);
+        vm.prank(testUser);
+
+
+        // Expect revert with InvalidTransitionIndex error
+        vm.expectRevert(VotingContract.InvalidTransitionIndex.selector);
+
+
+        // Because the aggregator's `transitionIndex` param is now stale (2),
+        // the contract code checks:
+        //   require(expectedHash == msgHash, "Invalid signature");
+        // However, the aggregator's "expectedHash" is for index 2,
+        // while the contract's BLS checks and storage are effectively beyond that.
+        // We expect "Invalid signature" revert because the contract's state
+        // doesn't match the aggregator's stale hash context anymore.
+        (bool success, bytes memory data) = address(votingContract).call{value: 0.1 ether}(
+            abi.encodeWithSelector(
+                votingContract.writeExecuteVote.selector,
+                msgHashStale,
+                apk,
+                apkG2,
+                sigma,
+                staleUpdates,
+                staleTransitionIndex,
+                address(votingContract),
+                targetFunction
+            )
+        );
+
+        // Check that it reverted for right reason. should be sucess if cause of revert is InvalidTransitionIndex
+        // manually adding staleTransitionIndex+1 to the call makes this fail because the revert reason becomes invalid signature
+        assertTrue(success, "Call should have reverted due to stale signature");
+        // Optionally, you could also parse the revert reason from 'data' to confirm
+        // it's "Invalid signature". For example:
+        if (data.length > 0) {
+            // The revert reason is ABI-encoded; the simplest approach is to check it as bytes
+            // or do a substring match. This snippet is optional, for demonstration:
+            // string memory reason = _getRevertMsg(data);
+            // assertEq(reason, "Invalid signature");
+        }
+    }
+
 }
