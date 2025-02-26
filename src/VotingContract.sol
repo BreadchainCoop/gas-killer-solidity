@@ -31,6 +31,8 @@ contract VotingContract {
         // Initialize the BLS signature checker
         blsSignatureChecker = BLSSignatureChecker(BLS_SIG_CHECKER);
         paymentContract = PaymentContract(_paymentContract);
+        voters.push(msg.sender);
+        votersArrayStorage[block.number] = abi.encode(voters);
     }
 
     /**
@@ -64,9 +66,14 @@ contract VotingContract {
         returns (uint256)
     {
         bytes memory storedArray = votersArrayStorage[_blockNumber];
-        // If no voters stored at that block, return 0.
-        if (storedArray.length == 0) {
-            return 0;
+
+        uint256 blockNum = _blockNumber;
+        while (storedArray.length == 0 && blockNum > 0) {
+            if (blockNum == 0) {
+                return 0;
+            }
+            blockNum--;
+            storedArray = votersArrayStorage[blockNum];
         }
 
         // Decode back the array of addresses
