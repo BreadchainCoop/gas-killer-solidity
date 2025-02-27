@@ -5,6 +5,8 @@ import "@eigenlayer-middleware/BLSSignatureChecker.sol";
 import "./Payments.sol";
 import "./StateTracker.sol";
 
+error HASH_MISMATCH(bytes32 expected, bytes32 actual, bytes params);
+
 contract VotingContract is StateTracker {
     // List of current voters
     address[] public voters;
@@ -161,8 +163,11 @@ contract VotingContract is StateTracker {
 
         //check that those 4 with namespace match the hash
         bytes32 expectedHash =
-            sha256(abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
-        require(expectedHash == msgHash, "Invalid signature");
+            sha256(abi.encode(transitionIndex, targetAddr, targetFunction, storageUpdates));
+        // require(expectedHash == msgHash, "Invalid signature");
+        if (expectedHash != msgHash) {
+            revert HASH_MISMATCH(expectedHash, msgHash, abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
+        }
 
         // ------------------------------------------------
         // 1) Verify BLS signature directly using trySignatureAndApkVerification
