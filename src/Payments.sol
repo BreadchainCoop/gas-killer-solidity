@@ -32,7 +32,7 @@ contract PaymentContract {
     function withdraw(address payable _to) external {
         require(msg.sender == owner, "Only owner can withdraw");
         uint256 balance = address(this).balance;
-        (bool success, ) = _to.call{value: balance}("");
+        (bool success,) = _to.call{value: balance}("");
         require(success, "Withdraw failed");
     }
 
