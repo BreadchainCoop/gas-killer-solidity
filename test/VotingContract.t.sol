@@ -194,7 +194,7 @@ contract VotingContractTest is Test {
         bytes memory namespace = "_COMMONWARE_AGGREGATION_";
         
         // Hash all parameters in specified order to create the message hash
-        bytes32 hash = keccak256(abi.encodePacked(
+        bytes32 hash = sha256(abi.encodePacked(
             namespace,
             blockNumber,
             targetAddr,
@@ -251,7 +251,7 @@ contract VotingContractTest is Test {
         bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate a valid mock signature hash
-        bytes32 validMsgHash = keccak256(abi.encodePacked(
+        bytes32 validMsgHash = sha256(abi.encodePacked(
             votingContract.namespace(),
             blockNumber,
             address(votingContract),
@@ -308,7 +308,7 @@ contract VotingContractTest is Test {
         bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate an invalid message hash (using a different target address)
-        bytes32 invalidMsgHash = keccak256(abi.encodePacked(
+        bytes32 invalidMsgHash = sha256(abi.encodePacked(
             votingContract.namespace(),
             blockNumber,
             address(0x999), // Different address
@@ -363,10 +363,10 @@ contract VotingContractTest is Test {
         // Get test BLS points
         (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         
-        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        bytes4 targetFunction = bytes4(sha256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate a valid message hash
-        bytes32 validMsgHash = keccak256(abi.encodePacked(
+        bytes32 validMsgHash = sha256(abi.encodePacked(
             votingContract.namespace(),
             blockNumber,
             address(votingContract),
@@ -445,10 +445,10 @@ contract VotingContractTest is Test {
         // Get test BLS points
         (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         
-        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        bytes4 targetFunction = bytes4(sha256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate a valid message hash using transition index
-        bytes32 validMsgHash = keccak256(abi.encodePacked(
+        bytes32 validMsgHash = sha256(abi.encodePacked(
             votingContract.namespace(),
             transitionIndex,
             address(votingContract),
@@ -514,10 +514,10 @@ contract VotingContractTest is Test {
         // Get test BLS points
         (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         
-        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        bytes4 targetFunction = bytes4(sha256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate a valid message hash
-        bytes32 validMsgHash = keccak256(abi.encodePacked(
+        bytes32 validMsgHash = sha256(abi.encodePacked(
             votingContract.namespace(),
             transitionIndex,
             address(votingContract),
@@ -626,10 +626,10 @@ contract VotingContractTest is Test {
         // Get test BLS points
         (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         
-        bytes4 targetFunction = bytes4(keccak256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
+        bytes4 targetFunction = bytes4(sha256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)"));
         
         // Generate a valid message hash
-        bytes32 validMsgHash = keccak256(abi.encodePacked(
+        bytes32 validMsgHash = sha256(abi.encodePacked(
             votingContract.namespace(),
             blockNumber,
             address(votingContract),
@@ -689,7 +689,7 @@ contract VotingContractTest is Test {
         );
 
         // This is the hash for transitionIndex = 2
-        bytes32 msgHashStale = keccak256(
+        bytes32 msgHashStale = sha256(
             abi.encodePacked(
                 votingContract.namespace(),
                 staleTransitionIndex,

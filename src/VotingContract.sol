@@ -171,7 +171,7 @@ contract VotingContract is StateTracker {
         paymentContract.deposit{value: msg.value}();
         
         //check that those 4 with namespace match the hash
-        bytes32 expectedHash = keccak256(abi.encodePacked(
+        bytes32 expectedHash = sha256(abi.encodePacked(
             namespace,
             transitionIndex,
             targetAddr,
@@ -259,7 +259,7 @@ contract VotingContract is StateTracker {
         bytes4 targetFunction
     ) external trackState returns (bytes memory) {
         // Hash all parameters in specified order to create the message hash
-        bytes32 expectedHash = keccak256(abi.encodePacked(
+        bytes32 expectedHash = sha256(abi.encodePacked(
             namespace,
             transitionIndex,
             targetAddr,
