@@ -20,7 +20,7 @@ contract VotingContract is StateTracker {
     BLSSignatureChecker public blsSignatureChecker;
     // The address of the BLS signature checker contract
     address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
-    
+
     // Hardcoded namespace matching the Rust constant
     bytes public constant namespace = "_COMMONWARE_AGGREGATION_";
 
@@ -29,13 +29,15 @@ contract VotingContract is StateTracker {
 
     // add revert
     error InvalidTransitionIndex();
-    
+
     constructor(address _paymentContract) {
         // Initialize the BLS signature checker
         blsSignatureChecker = BLSSignatureChecker(BLS_SIG_CHECKER);
         paymentContract = PaymentContract(_paymentContract);
         voters.push(msg.sender);
-        assembly { sstore(_stateTrackerSlot, add(0x01, sload(_stateTrackerSlot))) }
+        assembly {
+            sstore(_stateTrackerSlot, add(0x01, sload(_stateTrackerSlot)))
+        }
         votersArrayStorage[stateTransitionCount()] = abi.encode(voters);
     }
 
@@ -64,11 +66,7 @@ contract VotingContract is StateTracker {
      *         and computes the total voting power:
      *         sum( uint160(voterAddress) * transitionIndex ).
      */
-    function getCurrentTotalVotingPower(uint256 transitionIndex)
-        public
-        view
-        returns (uint256)
-    {
+    function getCurrentTotalVotingPower(uint256 transitionIndex) public view returns (uint256) {
         bytes memory storedArray = votersArrayStorage[transitionIndex];
 
         uint256 transNum = transitionIndex;
@@ -115,11 +113,7 @@ contract VotingContract is StateTracker {
     //  THREE ADDITIONAL EXECUTE/SLASH FUNCTIONS
     // ------------------------------------------------------------------------
 
-    function operatorExecuteVote(uint256 transitionIndex)
-        external
-        view
-        returns (bytes memory)
-    {
+    function operatorExecuteVote(uint256 transitionIndex) external view returns (bytes memory) {
         // 1) Calculate new voting power
         uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex);
 
@@ -133,7 +127,7 @@ contract VotingContract is StateTracker {
         //   - 1 byte: 0 => indicates "SSTORE"
         //   - 32 bytes: slot index
         //   - 32 bytes: value
-        
+
         bytes memory encoded = abi.encodePacked(
             // SSTORE currentTotalVotingPower
             uint8(0),
@@ -157,43 +151,29 @@ contract VotingContract is StateTracker {
         uint256 transitionIndex,
         address targetAddr,
         bytes4 targetFunction
-    )
-        external
-        payable
-        trackState
-        returns (bytes memory)
-    {
-        require(transitionIndex+1 == stateTransitionCount(), InvalidTransitionIndex());
+    ) external payable trackState returns (bytes memory) {
+        require(transitionIndex + 1 == stateTransitionCount(), InvalidTransitionIndex());
         // Check required ETH payment upfront
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
-        
+
         // Forward the 0.1 ETH to the PaymentContract
         paymentContract.deposit{value: msg.value}();
-        
+
         //check that those 4 with namespace match the hash
-        bytes32 expectedHash = sha256(abi.encodePacked(
-            namespace,
-            transitionIndex,
-            targetAddr,
-            targetFunction,
-            storageUpdates
-        ));
+        bytes32 expectedHash =
+            sha256(abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
         require(expectedHash == msgHash, "Invalid signature");
-        
+
         // ------------------------------------------------
         // 1) Verify BLS signature directly using trySignatureAndApkVerification
         // ------------------------------------------------
-        (bool pairingSuccessful, bool signatureIsValid) = blsSignatureChecker.trySignatureAndApkVerification(
-            msgHash,
-            apk,
-            apkG2,
-            sigma
-        );
-        
+        (bool pairingSuccessful, bool signatureIsValid) =
+            blsSignatureChecker.trySignatureAndApkVerification(msgHash, apk, apkG2, sigma);
+
         // Check if the signature verification was successful
         require(pairingSuccessful, "BLS pairing check failed");
         require(signatureIsValid, "Invalid BLS signature");
-        
+
         // ------------------------------------------------
         // 2) Apply the storage updates
         // ------------------------------------------------
@@ -259,55 +239,41 @@ contract VotingContract is StateTracker {
         bytes4 targetFunction
     ) external trackState returns (bytes memory) {
         // Hash all parameters in specified order to create the message hash
-        bytes32 expectedHash = sha256(abi.encodePacked(
-            namespace,
-            transitionIndex,
-            targetAddr,
-            targetFunction,
-            storageUpdates
-        ));
-        
+        bytes32 expectedHash =
+            sha256(abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
+
         // Check if signature hash matches expected hash
         bool signatureValid = (expectedHash == msgHash);
-        
+
         // If signature is invalid, we don't need to check BLS signatures
         if (!signatureValid) {
             return abi.encode(true); // Slashing needed
         }
 
         // Verify BLS signature directly using trySignatureAndApkVerification
-        (bool pairingSuccessful, bool signatureIsValid) = blsSignatureChecker.trySignatureAndApkVerification(
-            msgHash,
-            apk,
-            apkG2,
-            sigma
-        );
-        
+        (bool pairingSuccessful, bool signatureIsValid) =
+            blsSignatureChecker.trySignatureAndApkVerification(msgHash, apk, apkG2, sigma);
+
         // Check if the signature verification failed
         if (!pairingSuccessful || !signatureIsValid) {
             return abi.encode(true); // Slashing needed
         }
-        
+
         // Calculate what the correct storage updates should be
         bytes memory correctUpdates = this.operatorExecuteVote(transitionIndex);
-        
+
         // Check if provided storage updates match the correct ones
         bool updatesValid = keccak256(storageUpdates) == keccak256(correctUpdates);
-        
+
         // Slashing is needed if updates are incorrect
         bool slashNeeded = !updatesValid;
-        
+
         // Return slashing status
         return abi.encode(slashNeeded);
     }
 
     // Test-only version of writeExecuteVote that skips signature verification
-    function writeExecuteVoteTest(bytes calldata storageUpdates)
-        external
-        payable
-        trackState
-        returns (bytes memory)
-    {
+    function writeExecuteVoteTest(bytes calldata storageUpdates) external payable trackState returns (bytes memory) {
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
 
         // Forward the 0.1 ETH to the PaymentContract
@@ -353,5 +319,4 @@ contract VotingContract is StateTracker {
         // ------------------------------------------------
         return abi.encode(currentTotalVotingPower, lastVotePassed);
     }
-
 }
