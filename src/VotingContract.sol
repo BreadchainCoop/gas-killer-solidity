@@ -2,6 +2,9 @@
 pragma solidity ^0.8.0;
 
 import "@eigenlayer-middleware/BLSSignatureChecker.sol";
+import "@eigenlayer-middleware/interfaces/IInstantSlasher.sol";
+import "@eigenlayer-middleware/interfaces/ISlashingRegistryCoordinator.sol";
+import {IAllocationManager} from "eigenlayer-contracts/src/contracts/interfaces/IAllocationManager.sol";
 import "./Payments.sol";
 import "./StateTracker.sol";
 
@@ -27,6 +30,10 @@ contract VotingContract is StateTracker {
     // We store, for each transition index, an encoded array of voters that existed at that index.
     mapping(uint256 => bytes) public votersArrayStorage;
 
+    // EigenLayer slashing contracts
+    IInstantSlasher public slasher;
+    ISlashingRegistryCoordinator public registryCoordinator;
+
     // add revert
     error InvalidTransitionIndex();
 
@@ -39,6 +46,10 @@ contract VotingContract is StateTracker {
             sstore(_stateTrackerSlot, add(0x01, sload(_stateTrackerSlot)))
         }
         votersArrayStorage[stateTransitionCount()] = abi.encode(voters);
+
+        // These would be set to actual contract addresses in production
+        // slasher = IInstantSlasher(address(0));
+        // registryCoordinator = ISlashingRegistryCoordinator(address(0));
     }
 
     /**
@@ -247,6 +258,22 @@ contract VotingContract is StateTracker {
 
         // If signature is invalid, we don't need to check BLS signatures
         if (!signatureValid) {
+            // SLASHING LOGIC WOULD GO HERE
+            /* Commented out for now
+            if (address(slasher) != address(0)) {
+                // Create slashing parameters
+                IAllocationManager.SlashingParams memory slashParams = IAllocationManager.SlashingParams({
+                    operator: address(apk), // This would need to be the actual operator address
+                    operatorSetId: 0, // Would need actual operator set ID
+                    wadsToSlash: new uint256[](1), // Amount to slash
+                    strategies: new IStrategy[](1), // Strategies to slash
+                    description: "Invalid signature in voting contract"
+                });
+                
+                // Execute slashing via InstantSlasher
+                // slasher.fulfillSlashingRequest(slashParams);
+            }
+            */
             return abi.encode(true); // Slashing needed
         }
 
@@ -256,6 +283,22 @@ contract VotingContract is StateTracker {
 
         // Check if the signature verification failed
         if (!pairingSuccessful || !signatureIsValid) {
+            // SLASHING LOGIC WOULD GO HERE
+            /* Commented out for now
+            if (address(slasher) != address(0)) {
+                // Create slashing parameters for invalid BLS signature
+                IAllocationManager.SlashingParams memory slashParams = IAllocationManager.SlashingParams({
+                    operator: address(apk), // This would need to be the actual operator address
+                    operatorSetId: 0, // Would need actual operator set ID
+                    wadsToSlash: new uint256[](1), // Amount to slash
+                    strategies: new IStrategy[](1), // Strategies to slash
+                    description: "Invalid BLS signature in voting contract"
+                });
+                
+                // Execute slashing via InstantSlasher
+                // slasher.fulfillSlashingRequest(slashParams);
+            }
+            */
             return abi.encode(true); // Slashing needed
         }
 
@@ -267,6 +310,28 @@ contract VotingContract is StateTracker {
 
         // Slashing is needed if updates are incorrect
         bool slashNeeded = !updatesValid;
+
+        if (slashNeeded) {
+            // SLASHING LOGIC WOULD GO HERE
+            /* Commented out for now
+            if (address(slasher) != address(0)) {
+                // Get operator address from registry using APK
+                // address operatorAddress = registryCoordinator.getOperatorFromId(keccak256(abi.encode(apk)));
+                
+                // Create slashing parameters for incorrect storage updates
+                IAllocationManager.SlashingParams memory slashParams = IAllocationManager.SlashingParams({
+                    operator: address(0), // Would be populated with actual operator address
+                    operatorSetId: 0,
+                    wadsToSlash: new uint256[](1),
+                    strategies: new IStrategy[](1),
+                    description: "Incorrect storage updates in voting contract"
+                });
+                
+                // Execute slashing via InstantSlasher
+                // slasher.fulfillSlashingRequest(slashParams);
+            }
+            */
+        }
 
         // Return slashing status
         return abi.encode(slashNeeded);
@@ -318,5 +383,16 @@ contract VotingContract is StateTracker {
         // Return the updated state
         // ------------------------------------------------
         return abi.encode(currentTotalVotingPower, lastVotePassed);
+    }
+
+    /**
+     * @notice Sets the slasher contract
+     * @param _slasher The address of the InstantSlasher contract
+     * @param _registryCoordinator The address of the SlashingRegistryCoordinator contract
+     */
+    function setSlashingContracts(address _slasher, address _registryCoordinator) external {
+        // In production, add access control here
+        slasher = IInstantSlasher(_slasher);
+        registryCoordinator = ISlashingRegistryCoordinator(_registryCoordinator);
     }
 }
