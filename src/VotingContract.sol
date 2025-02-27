@@ -251,7 +251,7 @@ contract VotingContract is StateTracker {
     ) external trackState returns (bytes memory) {
         // Hash all parameters in specified order to create the message hash
         bytes32 expectedHash =
-            sha256(abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
+            sha256(abi.encode(transitionIndex, targetAddr, targetFunction, storageUpdates));
 
         // Check if signature hash matches expected hash
         bool signatureValid = (expectedHash == msgHash);
