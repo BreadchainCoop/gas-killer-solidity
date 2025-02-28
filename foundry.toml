@@ -9,4 +9,5 @@ via_ir = true
 
 
 [rpc_endpoints]
-holesky = "https://ethereum-holesky.publicnode.com"
+holesky = "https://erigon-holesky-ethereum-nodes.eigenlayer.xyz"
+mainnet = "https://eth-mainnet.public.blastapi.io"

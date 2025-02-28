@@ -9,74 +9,110 @@ import "./Payments.sol";
 import "./StateTracker.sol";
 
 contract VotingContract is StateTracker {
-    // List of current voters
+    // ------------------------------------------------------------------------
+    // 1) Hardcoded storage slot constants, using precomputed keccak256 values
+    // ------------------------------------------------------------------------
+    // keccak256("VotingContract.currentTotalVotingPower")
+    bytes32 internal constant CURRENT_TOTAL_VOTING_POWER_SLOT =
+        0x2ef300128d8bab26260cc62ee81b836797fdb69a87c72ee4ee954f2b31f5fc7e;
+
+    // keccak256("VotingContract.lastVotePassed")
+    bytes32 internal constant LAST_VOTE_PASSED_SLOT =
+        0x0df3fffaac6beb149ae42659747af9c815cf8bb1c2f1a56df229f8ec2f1b7b63;
+
+    // ------------------------------------------------------------------------
+    // 2) Other state variables
+    // ------------------------------------------------------------------------
     address[] public voters;
-
-    // Tracks our "current" total voting power.
-    uint256 public currentTotalVotingPower;
-    // Tracks if the last vote passed
-    bool public lastVotePassed;
-
     PaymentContract public paymentContract;
 
-    // The BLS signature checker contract
     BLSSignatureChecker public blsSignatureChecker;
-    // The address of the BLS signature checker contract
     address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
 
-    // Hardcoded namespace matching the Rust constant
     bytes public constant namespace = "_COMMONWARE_AGGREGATION_";
 
-    // We store, for each transition index, an encoded array of voters that existed at that index.
     mapping(uint256 => bytes) public votersArrayStorage;
 
-    // EigenLayer slashing contracts
     IInstantSlasher public slasher;
     ISlashingRegistryCoordinator public registryCoordinator;
 
-    // add revert
     error InvalidTransitionIndex();
 
+    // ------------------------------------------------------------------------
+    // 3) Constructor
+    // ------------------------------------------------------------------------
     constructor(address _paymentContract) {
         // Initialize the BLS signature checker
         blsSignatureChecker = BLSSignatureChecker(BLS_SIG_CHECKER);
+
+        // Initialize the PaymentContract
         paymentContract = PaymentContract(_paymentContract);
+
+        // Initialize the "voters" with `msg.sender`
         voters.push(msg.sender);
+
+        // Increment the state transition count (from StateTracker)
         assembly {
             sstore(_stateTrackerSlot, add(0x01, sload(_stateTrackerSlot)))
         }
-        votersArrayStorage[stateTransitionCount()] = abi.encode(voters);
 
-        // These would be set to actual contract addresses in production
-        // slasher = IInstantSlasher(address(0));
-        // registryCoordinator = ISlashingRegistryCoordinator(address(0));
+        // Store the new voters array under that initial transition
+        votersArrayStorage[stateTransitionCount()] = abi.encode(voters);
     }
 
-    /**
-     * @notice Adds a new voter and saves the updated voters array
-     *         into the mapping under the current transition index.
-     */
+    // ------------------------------------------------------------------------
+    // 4) Internal getters/setters for manual storage slots
+    // ------------------------------------------------------------------------
+    function _getCurrentTotalVotingPower() internal view returns (uint256 val) {
+        assembly {
+            val := sload(CURRENT_TOTAL_VOTING_POWER_SLOT)
+        }
+    }
+
+    function _setCurrentTotalVotingPower(uint256 newVal) internal {
+        assembly {
+            sstore(CURRENT_TOTAL_VOTING_POWER_SLOT, newVal)
+        }
+    }
+
+    function _getLastVotePassed() internal view returns (bool val) {
+        uint256 raw;
+        assembly {
+            raw := sload(LAST_VOTE_PASSED_SLOT)
+        }
+        val = (raw != 0);
+    }
+
+    function _setLastVotePassed(bool newVal) internal {
+        assembly {
+            sstore(LAST_VOTE_PASSED_SLOT, newVal)
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // 5) Public getters for scripts/tests
+    // ------------------------------------------------------------------------
+    function currentTotalVotingPower() external view returns (uint256) {
+        return _getCurrentTotalVotingPower();
+    }
+
+    function lastVotePassed() external view returns (bool) {
+        return _getLastVotePassed();
+    }
+
+    // ------------------------------------------------------------------------
+    // 6) Voter Management & Queries
+    // ------------------------------------------------------------------------
     function addVoter(address _voter) external trackState {
         voters.push(_voter);
-        // Encode and store the updated voters array for this index.
         bytes memory encodedVoters = abi.encode(voters);
         votersArrayStorage[stateTransitionCount()] = encodedVoters;
     }
 
-    /**
-     * @notice Returns the current in-memory voters array (as an ABI-encoded bytes array).
-     *         If you want the array of addresses, just do `return voters;` in a real contract,
-     *         but this matches your requirement for returning bytes.
-     */
     function getCurrentVotersArray() external view returns (bytes memory) {
         return abi.encode(voters);
     }
 
-    /**
-     * @notice Given a transition index, decodes the voters array that was stored at that index
-     *         and computes the total voting power:
-     *         sum( uint160(voterAddress) * transitionIndex ).
-     */
     function getCurrentTotalVotingPower(uint256 transitionIndex) public view returns (uint256) {
         bytes memory storedArray = votersArrayStorage[transitionIndex];
 
@@ -89,41 +125,33 @@ contract VotingContract is StateTracker {
             storedArray = votersArrayStorage[transNum];
         }
 
-        // Decode back the array of addresses
         address[] memory votersAtIndex = abi.decode(storedArray, (address[]));
-
         uint256 sumVal = 0;
+
         for (uint256 i = 0; i < votersAtIndex.length; i++) {
+            // Example formula
             sumVal += (uint160(votersAtIndex[i]) * transitionIndex);
         }
         return sumVal;
     }
 
-    /**
-     * @notice Example "executeVote" that recomputes
-     *         the currentTotalVotingPower for the latest transition index
-     *         and returns true if it's even, indicating the vote "passes."
-     */
+    // ------------------------------------------------------------------------
+    // 7) Standard "executeVote"
+    // ------------------------------------------------------------------------
     function executeVote() external trackState returns (bool) {
         uint256 newVotingPower = getCurrentTotalVotingPower(stateTransitionCount());
 
-        // Update the current total voting power.
-        currentTotalVotingPower = newVotingPower;
+        _setCurrentTotalVotingPower(newVotingPower);
 
-        // Check if the total voting power is even
         bool votePassed = (newVotingPower % 2 == 0);
+        _setLastVotePassed(votePassed);
 
-        // Store whether this vote passed
-        lastVotePassed = votePassed;
-
-        // Return whether the vote passed
         return votePassed;
     }
 
     // ------------------------------------------------------------------------
-    //  THREE ADDITIONAL EXECUTE/SLASH FUNCTIONS
+    // 8) operatorExecuteVote / writeExecuteVote / slashExecVote
     // ------------------------------------------------------------------------
-
     function operatorExecuteVote(uint256 transitionIndex) external view returns (bytes memory) {
         // 1) Calculate new voting power
         uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex);
@@ -131,26 +159,17 @@ contract VotingContract is StateTracker {
         // 2) Determine if vote passes (true if even)
         bool votePassed = (newVotingPower % 2 == 0);
 
-        // 3) Build the bytes payload to do:
-        //    sstore(1, newVotingPower)
-        //    sstore(2, votePassed ? 1 : 0 )
-        // Using the format:
-        //   - 1 byte: 0 => indicates "SSTORE"
-        //   - 32 bytes: slot index
-        //   - 32 bytes: value
-
-        bytes memory encoded = abi.encodePacked(
-            // SSTORE currentTotalVotingPower
+        // 3) Build the bytes payload:
+        //    sstore(CURRENT_TOTAL_VOTING_POWER_SLOT, newVotingPower)
+        //    sstore(LAST_VOTE_PASSED_SLOT, votePassed ? 1 : 0)
+        return abi.encodePacked(
             uint8(0),
-            uint256(1),
+            CURRENT_TOTAL_VOTING_POWER_SLOT,
             newVotingPower,
-            // SSTORE lastVotePassed
             uint8(0),
-            uint256(2),
+            LAST_VOTE_PASSED_SLOT,
             votePassed ? uint256(1) : uint256(0)
         );
-
-        return encoded;
     }
 
     function writeExecuteVote(
@@ -164,41 +183,27 @@ contract VotingContract is StateTracker {
         bytes4 targetFunction
     ) external payable trackState returns (bytes memory) {
         require(transitionIndex + 1 == stateTransitionCount(), InvalidTransitionIndex());
-        // Check required ETH payment upfront
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
-
-        // Forward the 0.1 ETH to the PaymentContract
         paymentContract.deposit{value: msg.value}();
 
-        //check that those 4 with namespace match the hash
         bytes32 expectedHash =
             sha256(abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
         require(expectedHash == msgHash, "Invalid signature");
 
-        // ------------------------------------------------
-        // 1) Verify BLS signature directly using trySignatureAndApkVerification
-        // ------------------------------------------------
         (bool pairingSuccessful, bool signatureIsValid) =
             blsSignatureChecker.trySignatureAndApkVerification(msgHash, apk, apkG2, sigma);
-
-        // Check if the signature verification was successful
         require(pairingSuccessful, "BLS pairing check failed");
         require(signatureIsValid, "Invalid BLS signature");
 
-        // ------------------------------------------------
         // 2) Apply the storage updates
-        // ------------------------------------------------
         uint256 i = 0;
         while (i < storageUpdates.length) {
-            // First byte is the operation (must be 0 for SSTORE).
             require(i + 1 <= storageUpdates.length, "Invalid opcode offset");
             uint8 op = uint8(storageUpdates[i]);
             i++;
 
-            // We only support SSTORE (op = 0) in this example
             require(op == 0, "Unsupported operation (op must be 0)");
 
-            // Next 32 bytes is the storage slot
             require(i + 32 <= storageUpdates.length, "Missing slot data");
             uint256 slot;
             assembly {
@@ -206,7 +211,6 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Next 32 bytes is the value
             require(i + 32 <= storageUpdates.length, "Missing value data");
             uint256 val;
             assembly {
@@ -214,31 +218,15 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Perform the SSTORE
             assembly {
                 sstore(slot, val)
             }
         }
 
-        // ------------------------------------------------
-        // 3) Return the updated state
-        // ------------------------------------------------
-        return abi.encode(currentTotalVotingPower, lastVotePassed);
+        // 3) Return updated state
+        return abi.encode(_getCurrentTotalVotingPower(), _getLastVotePassed());
     }
 
-    /**
-     * @notice Function to verify if a signature is valid and contains correct storage updates
-     * @dev Hashes the input parameters and compares with the signature, also verifies storage updates
-     * @param msgHash The signature hash to verify
-     * @param apk The aggregate public key in G1
-     * @param apkG2 The aggregate public key in G2
-     * @param sigma The signature to verify
-     * @param storageUpdates The storage updates to verify
-     * @param transitionIndex The transition index to use for verification
-     * @param targetAddr The address that the signature is for
-     * @param targetFunction The function that the signature targets
-     * @return An encoded result containing verification results
-     */
     function slashExecVote(
         bytes32 msgHash,
         BN254.G1Point memory apk,
@@ -249,115 +237,49 @@ contract VotingContract is StateTracker {
         address targetAddr,
         bytes4 targetFunction
     ) external trackState returns (bytes memory) {
-        // Hash all parameters in specified order to create the message hash
         bytes32 expectedHash =
             sha256(abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
-
-        // Check if signature hash matches expected hash
         bool signatureValid = (expectedHash == msgHash);
 
-        // If signature is invalid, we don't need to check BLS signatures
         if (!signatureValid) {
-            // SLASHING LOGIC WOULD GO HERE
-            /* Commented out for now
-            if (address(slasher) != address(0)) {
-                // Create slashing parameters
-                IAllocationManager.SlashingParams memory slashParams = IAllocationManager.SlashingParams({
-                    operator: address(apk), // This would need to be the actual operator address
-                    operatorSetId: 0, // Would need actual operator set ID
-                    wadsToSlash: new uint256[](1), // Amount to slash
-                    strategies: new IStrategy[](1), // Strategies to slash
-                    description: "Invalid signature in voting contract"
-                });
-                
-                // Execute slashing via InstantSlasher
-                // slasher.fulfillSlashingRequest(slashParams);
-            }
-            */
+            // SLASHING logic here if desired
             return abi.encode(true); // Slashing needed
         }
 
-        // Verify BLS signature directly using trySignatureAndApkVerification
         (bool pairingSuccessful, bool signatureIsValid) =
             blsSignatureChecker.trySignatureAndApkVerification(msgHash, apk, apkG2, sigma);
 
-        // Check if the signature verification failed
         if (!pairingSuccessful || !signatureIsValid) {
-            // SLASHING LOGIC WOULD GO HERE
-            /* Commented out for now
-            if (address(slasher) != address(0)) {
-                // Create slashing parameters for invalid BLS signature
-                IAllocationManager.SlashingParams memory slashParams = IAllocationManager.SlashingParams({
-                    operator: address(apk), // This would need to be the actual operator address
-                    operatorSetId: 0, // Would need actual operator set ID
-                    wadsToSlash: new uint256[](1), // Amount to slash
-                    strategies: new IStrategy[](1), // Strategies to slash
-                    description: "Invalid BLS signature in voting contract"
-                });
-                
-                // Execute slashing via InstantSlasher
-                // slasher.fulfillSlashingRequest(slashParams);
-            }
-            */
+            // SLASHING logic here if desired
             return abi.encode(true); // Slashing needed
         }
 
-        // Calculate what the correct storage updates should be
         bytes memory correctUpdates = this.operatorExecuteVote(transitionIndex);
+        bool updatesValid = (keccak256(storageUpdates) == keccak256(correctUpdates));
 
-        // Check if provided storage updates match the correct ones
-        bool updatesValid = keccak256(storageUpdates) == keccak256(correctUpdates);
-
-        // Slashing is needed if updates are incorrect
         bool slashNeeded = !updatesValid;
-
         if (slashNeeded) {
-            // SLASHING LOGIC WOULD GO HERE
-            /* Commented out for now
-            if (address(slasher) != address(0)) {
-                // Get operator address from registry using APK
-                // address operatorAddress = registryCoordinator.getOperatorFromId(keccak256(abi.encode(apk)));
-                
-                // Create slashing parameters for incorrect storage updates
-                IAllocationManager.SlashingParams memory slashParams = IAllocationManager.SlashingParams({
-                    operator: address(0), // Would be populated with actual operator address
-                    operatorSetId: 0,
-                    wadsToSlash: new uint256[](1),
-                    strategies: new IStrategy[](1),
-                    description: "Incorrect storage updates in voting contract"
-                });
-                
-                // Execute slashing via InstantSlasher
-                // slasher.fulfillSlashingRequest(slashParams);
-            }
-            */
+            // SLASHING logic if desired
         }
 
-        // Return slashing status
         return abi.encode(slashNeeded);
     }
 
-    // Test-only version of writeExecuteVote that skips signature verification
+    // ------------------------------------------------------------------------
+    // 9) Test-only skipping signature verification
+    // ------------------------------------------------------------------------
     function writeExecuteVoteTest(bytes calldata storageUpdates) external payable trackState returns (bytes memory) {
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
-
-        // Forward the 0.1 ETH to the PaymentContract
         paymentContract.deposit{value: msg.value}();
 
-        // ------------------------------------------------
-        // Skip signature verification and apply storage updates directly
-        // ------------------------------------------------
         uint256 i = 0;
         while (i < storageUpdates.length) {
-            // First byte is the operation (must be 0 for SSTORE).
             require(i + 1 <= storageUpdates.length, "Invalid opcode offset");
             uint8 op = uint8(storageUpdates[i]);
             i++;
 
-            // We only support SSTORE (op = 0) in this example
             require(op == 0, "Unsupported operation (op must be 0)");
 
-            // Next 32 bytes is the storage slot
             require(i + 32 <= storageUpdates.length, "Missing slot data");
             uint256 slot;
             assembly {
@@ -365,7 +287,6 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Next 32 bytes is the value
             require(i + 32 <= storageUpdates.length, "Missing value data");
             uint256 val;
             assembly {
@@ -373,25 +294,19 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Perform the SSTORE
             assembly {
                 sstore(slot, val)
             }
         }
 
-        // ------------------------------------------------
-        // Return the updated state
-        // ------------------------------------------------
-        return abi.encode(currentTotalVotingPower, lastVotePassed);
+        return abi.encode(_getCurrentTotalVotingPower(), _getLastVotePassed());
     }
 
-    /**
-     * @notice Sets the slasher contract
-     * @param _slasher The address of the InstantSlasher contract
-     * @param _registryCoordinator The address of the SlashingRegistryCoordinator contract
-     */
+    // ------------------------------------------------------------------------
+    // 10) Set Slashing Contracts (production usage)
+    // ------------------------------------------------------------------------
     function setSlashingContracts(address _slasher, address _registryCoordinator) external {
-        // In production, add access control here
+        // In production, add access control
         slasher = IInstantSlasher(_slasher);
         registryCoordinator = ISlashingRegistryCoordinator(_registryCoordinator);
     }

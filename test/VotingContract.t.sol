@@ -523,6 +523,11 @@ contract VotingContractTest is Test {
         // Verify the voting power was updated correctly - get it directly from the contract
         uint256 actualPower = votingContract.currentTotalVotingPower();
         assertEq(actualPower, expectedPower, "Total voting power should be updated correctly");
+
+        // Verify that the payment contract address is not zero
+        assertTrue(address(paymentContract) != address(0), "Payment contract address should not be zero");
+
+        
     }
 
     function testPaymentContractWithdrawal() public {
@@ -701,13 +706,25 @@ contract VotingContractTest is Test {
         // Check that it reverted for right reason. should be sucess if cause of revert is InvalidTransitionIndex
         // manually adding staleTransitionIndex+1 to the call makes this fail because the revert reason becomes invalid signature
         assertTrue(success, "Call should have reverted due to stale signature");
-        // Optionally, you could also parse the revert reason from 'data' to confirm
-        // it's "Invalid signature". For example:
-        if (data.length > 0) {
-            // The revert reason is ABI-encoded; the simplest approach is to check it as bytes
-            // or do a substring match. This snippet is optional, for demonstration:
-            // string memory reason = _getRevertMsg(data);
-            // assertEq(reason, "Invalid signature");
-        }
+
+
+        //this check to make sure state transition doesnt iterate to the next index when previous call reverted
+        // invalid signature means got past the state transition check
+        vm.expectRevert("Invalid signature");
+
+        (bool success2, bytes memory data2) = address(votingContract).call{value: 0.1 ether}(
+            abi.encodeWithSelector(
+                votingContract.writeExecuteVote.selector,
+                msgHashStale,
+                apk,
+                apkG2,
+                sigma,
+                staleUpdates,
+                staleTransitionIndex+1,
+                address(votingContract),
+                targetFunction
+            )
+        );
+        assertTrue(success2, "Call should have succeeded");
     }
 }
