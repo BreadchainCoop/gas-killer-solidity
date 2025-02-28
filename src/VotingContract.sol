@@ -12,10 +12,16 @@ contract VotingContract is StateTracker {
     // List of current voters
     address[] public voters;
 
-    // Tracks our "current" total voting power.
-    uint256 public currentTotalVotingPower;
-    // Tracks if the last vote passed
-    bool public lastVotePassed;
+    // ------------------------------------------------------------------------
+    // 1) Hardcoded storage slot constants, using precomputed keccak256 values
+    // ------------------------------------------------------------------------
+    // keccak256("VotingContract.currentTotalVotingPower")
+    bytes32 internal constant CURRENT_TOTAL_VOTING_POWER_SLOT =
+        0x2ef300128d8bab26260cc62ee81b836797fdb69a87c72ee4ee954f2b31f5fc7e;
+
+    // keccak256("VotingContract.lastVotePassed")
+    bytes32 internal constant LAST_VOTE_PASSED_SLOT =
+        0x0df3fffaac6beb149ae42659747af9c815cf8bb1c2f1a56df229f8ec2f1b7b63;
 
     PaymentContract public paymentContract;
 
@@ -105,18 +111,13 @@ contract VotingContract is StateTracker {
      *         and returns true if it's even, indicating the vote "passes."
      */
     function executeVote() external trackState returns (bool) {
-        uint256 newVotingPower = getCurrentTotalVotingPower(stateTransitionCount());
+       uint256 newVotingPower = getCurrentTotalVotingPower(stateTransitionCount());
 
-        // Update the current total voting power.
-        currentTotalVotingPower = newVotingPower;
+        _setCurrentTotalVotingPower(newVotingPower);
 
-        // Check if the total voting power is even
         bool votePassed = (newVotingPower % 2 == 0);
+        _setLastVotePassed(votePassed);
 
-        // Store whether this vote passed
-        lastVotePassed = votePassed;
-
-        // Return whether the vote passed
         return votePassed;
     }
 
@@ -125,32 +126,23 @@ contract VotingContract is StateTracker {
     // ------------------------------------------------------------------------
 
     function operatorExecuteVote(uint256 transitionIndex) external view returns (bytes memory) {
-        // 1) Calculate new voting power
+       // 1) Calculate new voting power
         uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex);
 
         // 2) Determine if vote passes (true if even)
         bool votePassed = (newVotingPower % 2 == 0);
 
-        // 3) Build the bytes payload to do:
-        //    sstore(1, newVotingPower)
-        //    sstore(2, votePassed ? 1 : 0 )
-        // Using the format:
-        //   - 1 byte: 0 => indicates "SSTORE"
-        //   - 32 bytes: slot index
-        //   - 32 bytes: value
-
-        bytes memory encoded = abi.encodePacked(
-            // SSTORE currentTotalVotingPower
+        // 3) Build the bytes payload:
+        //    sstore(CURRENT_TOTAL_VOTING_POWER_SLOT, newVotingPower)
+        //    sstore(LAST_VOTE_PASSED_SLOT, votePassed ? 1 : 0)
+        return abi.encodePacked(
             uint8(0),
-            uint256(1),
+            CURRENT_TOTAL_VOTING_POWER_SLOT,
             newVotingPower,
-            // SSTORE lastVotePassed
             uint8(0),
-            uint256(2),
+            LAST_VOTE_PASSED_SLOT,
             votePassed ? uint256(1) : uint256(0)
         );
-
-        return encoded;
     }
 
     function writeExecuteVote(
@@ -164,41 +156,27 @@ contract VotingContract is StateTracker {
         bytes4 targetFunction
     ) external payable trackState returns (bytes memory) {
         require(transitionIndex + 1 == stateTransitionCount(), InvalidTransitionIndex());
-        // Check required ETH payment upfront
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
-
-        // Forward the 0.1 ETH to the PaymentContract
         paymentContract.deposit{value: msg.value}();
 
-        //check that those 4 with namespace match the hash
         bytes32 expectedHash =
             sha256(abi.encodePacked(namespace, transitionIndex, targetAddr, targetFunction, storageUpdates));
         require(expectedHash == msgHash, "Invalid signature");
 
-        // ------------------------------------------------
-        // 1) Verify BLS signature directly using trySignatureAndApkVerification
-        // ------------------------------------------------
         (bool pairingSuccessful, bool signatureIsValid) =
             blsSignatureChecker.trySignatureAndApkVerification(msgHash, apk, apkG2, sigma);
-
-        // Check if the signature verification was successful
         require(pairingSuccessful, "BLS pairing check failed");
         require(signatureIsValid, "Invalid BLS signature");
 
-        // ------------------------------------------------
         // 2) Apply the storage updates
-        // ------------------------------------------------
         uint256 i = 0;
         while (i < storageUpdates.length) {
-            // First byte is the operation (must be 0 for SSTORE).
             require(i + 1 <= storageUpdates.length, "Invalid opcode offset");
             uint8 op = uint8(storageUpdates[i]);
             i++;
 
-            // We only support SSTORE (op = 0) in this example
             require(op == 0, "Unsupported operation (op must be 0)");
 
-            // Next 32 bytes is the storage slot
             require(i + 32 <= storageUpdates.length, "Missing slot data");
             uint256 slot;
             assembly {
@@ -206,7 +184,6 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Next 32 bytes is the value
             require(i + 32 <= storageUpdates.length, "Missing value data");
             uint256 val;
             assembly {
@@ -214,16 +191,13 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Perform the SSTORE
             assembly {
                 sstore(slot, val)
             }
         }
 
-        // ------------------------------------------------
-        // 3) Return the updated state
-        // ------------------------------------------------
-        return abi.encode(currentTotalVotingPower, lastVotePassed);
+        // 3) Return updated state
+        return abi.encode(_getCurrentTotalVotingPower(), _getLastVotePassed());
     }
 
     /**
@@ -339,25 +313,17 @@ contract VotingContract is StateTracker {
 
     // Test-only version of writeExecuteVote that skips signature verification
     function writeExecuteVoteTest(bytes calldata storageUpdates) external payable trackState returns (bytes memory) {
-        require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
-
-        // Forward the 0.1 ETH to the PaymentContract
+         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
         paymentContract.deposit{value: msg.value}();
 
-        // ------------------------------------------------
-        // Skip signature verification and apply storage updates directly
-        // ------------------------------------------------
         uint256 i = 0;
         while (i < storageUpdates.length) {
-            // First byte is the operation (must be 0 for SSTORE).
             require(i + 1 <= storageUpdates.length, "Invalid opcode offset");
             uint8 op = uint8(storageUpdates[i]);
             i++;
 
-            // We only support SSTORE (op = 0) in this example
             require(op == 0, "Unsupported operation (op must be 0)");
 
-            // Next 32 bytes is the storage slot
             require(i + 32 <= storageUpdates.length, "Missing slot data");
             uint256 slot;
             assembly {
@@ -365,7 +331,6 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Next 32 bytes is the value
             require(i + 32 <= storageUpdates.length, "Missing value data");
             uint256 val;
             assembly {
@@ -373,16 +338,12 @@ contract VotingContract is StateTracker {
             }
             i += 32;
 
-            // Perform the SSTORE
             assembly {
                 sstore(slot, val)
             }
         }
 
-        // ------------------------------------------------
-        // Return the updated state
-        // ------------------------------------------------
-        return abi.encode(currentTotalVotingPower, lastVotePassed);
+        return abi.encode(_getCurrentTotalVotingPower(), _getLastVotePassed());
     }
 
     /**
@@ -394,5 +355,45 @@ contract VotingContract is StateTracker {
         // In production, add access control here
         slasher = IInstantSlasher(_slasher);
         registryCoordinator = ISlashingRegistryCoordinator(_registryCoordinator);
+    }
+
+    // ------------------------------------------------------------------------
+    // Internal getters/setters for manual storage slots
+    // ------------------------------------------------------------------------
+    function _getCurrentTotalVotingPower() internal view returns (uint256 val) {
+        assembly {
+            val := sload(CURRENT_TOTAL_VOTING_POWER_SLOT)
+        }
+    }
+
+    function _setCurrentTotalVotingPower(uint256 newVal) internal {
+        assembly {
+            sstore(CURRENT_TOTAL_VOTING_POWER_SLOT, newVal)
+        }
+    }
+
+    function _getLastVotePassed() internal view returns (bool val) {
+        uint256 raw;
+        assembly {
+            raw := sload(LAST_VOTE_PASSED_SLOT)
+        }
+        val = (raw != 0);
+    }
+
+    function _setLastVotePassed(bool newVal) internal {
+        assembly {
+            sstore(LAST_VOTE_PASSED_SLOT, newVal)
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Public getters for scripts/tests
+    // ------------------------------------------------------------------------
+    function currentTotalVotingPower() external view returns (uint256) {
+        return _getCurrentTotalVotingPower();
+    }
+
+    function lastVotePassed() external view returns (bool) {
+        return _getLastVotePassed();
     }
 }
