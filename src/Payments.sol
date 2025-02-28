@@ -6,6 +6,8 @@ import "eigenlayer-contracts/src/contracts/interfaces/IRewardsCoordinator.sol";
 import "eigenlayer-contracts/src/contracts/interfaces/IStrategy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 /**
  * @title PaymentContract
  * @notice This contract collects fees and can distribute them as rewards to EigenLayer operators
@@ -19,6 +21,8 @@ contract PaymentContract {
 
     // Mock WETH for converting ETH to tokens for rewards
     address public mockWETH;
+    mapping(address => uint256) public balances;
+    mapping(address => mapping(address => uint256)) public erc20Balances;
 
     constructor() {
         owner = msg.sender;
@@ -29,6 +33,7 @@ contract PaymentContract {
      */
     function deposit() external payable {
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
+        balances[msg.sender] += msg.value;
         // The 0.1 ETH now sits in this contract's balance.
         // You can track or emit events here as needed.
     }
@@ -110,4 +115,15 @@ contract PaymentContract {
 
     // Event to track rewards distribution
     event RewardsDistributed(uint256 ethAmount, uint256 tokenAmount);
+
+    /**
+     * @dev Allows users to deposit ERC-20 tokens.
+     * @param token The address of the ERC-20 token contract.
+     * @param amount The amount of tokens to deposit.
+     */
+    function depositERC20(address token, uint256 amount) external {
+        require(amount > 0, "Amount must be greater than zero");
+        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        erc20Balances[token][msg.sender] += amount;
+    }
 }
