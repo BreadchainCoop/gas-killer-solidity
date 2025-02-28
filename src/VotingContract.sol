@@ -70,8 +70,6 @@ contract VotingContract is StateTracker {
 
     /**
      * @notice Returns the current in-memory voters array (as an ABI-encoded bytes array).
-     *         If you want the array of addresses, just do `return voters;` in a real contract,
-     *         but this matches your requirement for returning bytes.
      */
     function getCurrentVotersArray() external view returns (bytes memory) {
         return abi.encode(voters);
@@ -86,6 +84,7 @@ contract VotingContract is StateTracker {
         bytes memory storedArray = votersArrayStorage[transitionIndex];
 
         uint256 transNum = transitionIndex;
+        // intentionally dumb loop to find the correct transition index. takes lots of gas.
         while (storedArray.length == 0 && transNum > 0) {
             if (transNum == 0) {
                 return 0;
@@ -105,9 +104,10 @@ contract VotingContract is StateTracker {
     }
 
     /**
-     * @notice Example "executeVote" that recomputes
+     * @notice  executeVote that recomputes
      *         the currentTotalVotingPower for the latest transition index
      *         and returns true if it's even, indicating the vote "passes."
+     *         This function takes a lot of gas.
      */
     function executeVote() external trackState returns (bool) {
         uint256 newVotingPower = getCurrentTotalVotingPower(stateTransitionCount());
@@ -124,6 +124,13 @@ contract VotingContract is StateTracker {
     //  THREE ADDITIONAL EXECUTE/SLASH FUNCTIONS
     // ------------------------------------------------------------------------
 
+    /**
+     * @notice  operatorExecuteVote that recomputes
+     *         the currentTotalVotingPower for the latest transition index
+     *         and returns true if it's even, indicating the vote "passes."
+     *         This function takes a lot of gas. This is the view version of executeVote.
+     *         This function is used by the operator to calculate the correct storage updates.
+     */
     function operatorExecuteVote(uint256 transitionIndex) external view returns (bytes memory) {
         // 1) Calculate new voting power
         uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex);
@@ -144,6 +151,11 @@ contract VotingContract is StateTracker {
         );
     }
 
+    /**
+     * @notice  writeExecuteVote that recomputes
+     *         operator submits signature info and storage updates
+     *         and the contract applies the updates.
+     */
     function writeExecuteVote(
         bytes32 msgHash,
         BN254.G1Point memory apk,
@@ -200,16 +212,8 @@ contract VotingContract is StateTracker {
 
     /**
      * @notice Function to verify if a signature is valid and contains correct storage updates
-     * @dev Hashes the input parameters and compares with the signature, also verifies storage updates
-     * @param msgHash The signature hash to verify
-     * @param apk The aggregate public key in G1
-     * @param apkG2 The aggregate public key in G2
-     * @param sigma The signature to verify
-     * @param storageUpdates The storage updates to verify
-     * @param transitionIndex The transition index to use for verification
-     * @param targetAddr The address that the signature is for
-     * @param targetFunction The function that the signature targets
-     * @return An encoded result containing verification results
+     *          This function enables objective on chain slashing.
+     *          For now, the slashing logic is commented out.
      */
     function slashExecVote(
         bytes32 msgHash,

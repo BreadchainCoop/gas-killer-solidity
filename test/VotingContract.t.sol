@@ -166,10 +166,7 @@ contract VotingContractTest is Test {
         assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match expected");
     }
 
-    /**
-     * @notice Helper function to generate a mock signature for testing
-     * @dev Creates a signature by hashing the parameters in the correct order
-     */
+    // Helper function to generate a mock signature for testing
     function _generateMockSignature(
         uint256 blockNumber,
         address targetAddr,
@@ -186,7 +183,7 @@ contract VotingContractTest is Test {
         return abi.encodePacked(hash);
     }
 
-    // Updated helper function to create a more suitable mock NonSignerStakesAndSignature struct
+    // Helper function to create a more suitable mock NonSignerStakesAndSignature struct
     function _createMockNonSignerStakesAndSignature()
         internal
         pure
@@ -218,6 +215,7 @@ contract VotingContractTest is Test {
         return params;
     }
 
+    // Test that slashing is needed for valid signature
     function testSlashExecVoteValid() public {
         // Add a voter to have some state
         address voter1 = address(0x222);
@@ -266,6 +264,7 @@ contract VotingContractTest is Test {
         assertFalse(slashNeeded, "Slashing should not be needed for valid parameters");
     }
 
+    // Test that slashing is needed for invalid signature
     function testSlashExecVoteInvalidSignature() public {
         // Add a voter to have some state
         address voter1 = address(0x222);
@@ -410,6 +409,7 @@ contract VotingContractTest is Test {
         require(success, "Call failed");
     }
 
+    // Test that non-owner cannot withdraw
     function testCannotWithdrawAsNonOwner() public {
         // Check initial balance
         assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
@@ -429,6 +429,7 @@ contract VotingContractTest is Test {
         paymentContract.withdraw(receiver);
     }
 
+    // Test that the function works correctly with valid parameters
     function testPaymentContractWithdrawal() public {
         // Check initial balance
         assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
@@ -451,6 +452,7 @@ contract VotingContractTest is Test {
         assertEq(receiver.balance, initialBalance + 0.1 ether, "Receiver should have received 0.1 ETH");
     }
 
+    // Test that the function works correctly with valid parameters
     function testWriteExecuteVote() public {
         // Make sure we start with a clean state
         assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
@@ -483,6 +485,7 @@ contract VotingContractTest is Test {
         assertEq(actualPower, expectedPower, "Total voting power should be updated correctly");
     }
 
+    // Test that the function reverts if the wrong amount of ETH is sent
     function testWriteExecuteVoteMustSendExactAmount() public {
         // Add a voter to have some state
         address voter1 = address(0x222);
@@ -533,19 +536,18 @@ contract VotingContractTest is Test {
         assertFalse(success, "Call should fail with incorrect ETH amount");
     }
 
+    // Test that a front-run in the same block reverts
     function testFrontRunSameBlockReverts() public {
-        // 1) Add a voter so we move to transitionIndex = 2
+        //  Add a voter so we move to transitionIndex = 2
         //    (initial deploy = 1, first addVoter = 2)
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
 
-        // 2) aggregator obtains "correct" updates for the *current* transition index,
-        //    which is now 2.
+        // Get the current transition index
         uint256 staleTransitionIndex = votingContract.stateTransitionCount();
         bytes memory staleUpdates = votingContract.operatorExecuteVote(staleTransitionIndex);
 
-        // 3) aggregator calculates the BLS signature for `staleTransitionIndex`.
-        //    We'll mock it again. (Same approach as your other tests.)
+        // Get test BLS points
         (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         bytes4 targetFunction = bytes4(
             keccak256(
@@ -570,8 +572,6 @@ contract VotingContractTest is Test {
         );
 
         // 4) Now, a front-run TX occurs in the *same block* that changes state again.
-        //    In Foundry, each vm.call typically mines a separate block by default.
-        //    But we can artificially keep the same block by rolling back the block number.
         //    We do *another* addVoter, which increments the transition index => 3.
         //    We'll forcibly revert the block number afterward, to simulate them being
         //    in the same block.
@@ -592,13 +592,7 @@ contract VotingContractTest is Test {
         // Expect revert with InvalidTransitionIndex error
         vm.expectRevert(VotingContract.InvalidTransitionIndex.selector);
 
-        // Because the aggregator's `transitionIndex` param is now stale (2),
-        // the contract code checks:
-        //   require(expectedHash == msgHash, "Invalid signature");
-        // However, the aggregator's "expectedHash" is for index 2,
-        // while the contract's BLS checks and storage are effectively beyond that.
-        // We expect "Invalid signature" revert because the contract's state
-        // doesn't match the aggregator's stale hash context anymore.
+        // transitionIndex is stale, so the call will revert
         (bool success, bytes memory data) = address(votingContract).call{value: 0.1 ether}(
             abi.encodeWithSelector(
                 votingContract.writeExecuteVote.selector,
