@@ -20,8 +20,7 @@ contract VotingContract is StateTracker {
         0x2ef300128d8bab26260cc62ee81b836797fdb69a87c72ee4ee954f2b31f5fc7e;
 
     // keccak256("VotingContract.lastVotePassed")
-    bytes32 internal constant LAST_VOTE_PASSED_SLOT =
-        0x0df3fffaac6beb149ae42659747af9c815cf8bb1c2f1a56df229f8ec2f1b7b63;
+    bytes32 internal constant LAST_VOTE_PASSED_SLOT = 0x0df3fffaac6beb149ae42659747af9c815cf8bb1c2f1a56df229f8ec2f1b7b63;
 
     PaymentContract public paymentContract;
 
@@ -111,7 +110,7 @@ contract VotingContract is StateTracker {
      *         and returns true if it's even, indicating the vote "passes."
      */
     function executeVote() external trackState returns (bool) {
-       uint256 newVotingPower = getCurrentTotalVotingPower(stateTransitionCount());
+        uint256 newVotingPower = getCurrentTotalVotingPower(stateTransitionCount());
 
         _setCurrentTotalVotingPower(newVotingPower);
 
@@ -126,7 +125,7 @@ contract VotingContract is StateTracker {
     // ------------------------------------------------------------------------
 
     function operatorExecuteVote(uint256 transitionIndex) external view returns (bytes memory) {
-       // 1) Calculate new voting power
+        // 1) Calculate new voting power
         uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex);
 
         // 2) Determine if vote passes (true if even)
@@ -159,8 +158,7 @@ contract VotingContract is StateTracker {
         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
         paymentContract.deposit{value: msg.value}();
 
-        bytes32 expectedHash =
-            sha256(abi.encode(transitionIndex, targetAddr, targetFunction, storageUpdates));
+        bytes32 expectedHash = sha256(abi.encode(transitionIndex, targetAddr, targetFunction, storageUpdates));
         require(expectedHash == msgHash, "Invalid signature");
 
         (bool pairingSuccessful, bool signatureIsValid) =
@@ -313,7 +311,7 @@ contract VotingContract is StateTracker {
 
     // Test-only version of writeExecuteVote that skips signature verification
     function writeExecuteVoteTest(bytes calldata storageUpdates) external payable trackState returns (bytes memory) {
-         require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
+        require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
         paymentContract.deposit{value: msg.value}();
 
         uint256 i = 0;
