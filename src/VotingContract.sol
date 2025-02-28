@@ -21,7 +21,7 @@ contract VotingContract is StateTracker {
     // The BLS signature checker contract
     BLSSignatureChecker public blsSignatureChecker;
     // The address of the BLS signature checker contract
-    address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
+    address public constant BLS_SIG_CHECKER = address(0x870679E138bCdf293b7Ff14dD44b70FC97e12fc0);
 
     // Hardcoded namespace matching the Rust constant
     bytes public constant namespace = "_COMMONWARE_AGGREGATION_";
