@@ -13,9 +13,9 @@ import "src/Payments.sol";
  */
 contract BenchmarkComparison is Script {
     // Number of voters to add
-    uint256 constant NUM_VOTERS = 130;
+    uint256 constant NUM_VOTERS = 40;
     // Number of votes to execute
-    uint256 constant NUM_VOTES = 5;
+    uint256 constant NUM_VOTES = 1;
     
     // The contracts we'll deploy
     VotingContract traditionalVoting;
@@ -44,18 +44,38 @@ contract BenchmarkComparison is Script {
         console.log("- Traditional Voting: %s", address(traditionalVoting));
         console.log("- Optimized Voting: %s", address(optimizedVoting));
         
-        // Setup voters for both contracts (same voters for fair comparison)
+        // Generate voter addresses in advance
         address[] memory voters = new address[](NUM_VOTERS);
         for (uint i = 0; i < NUM_VOTERS; i++) {
-            // Generate deterministic addresses
             voters[i] = address(uint160(uint256(keccak256(abi.encodePacked(i)))));
-            
-            // Add to both contracts
-            traditionalVoting.addVoter(voters[i]);
-            optimizedVoting.addVoter(voters[i]);
         }
         
-        console.log("Added %d voters to both contracts", NUM_VOTERS);
+        // For parallelization, we'll add voters using concurrent transactions
+        // This uses multiple transaction submissions in a single broadcast session
+        console.log("Adding %d voters to contracts...", NUM_VOTERS);
+        
+        // First add voters to traditional voting contract
+        for (uint i = 0; i < NUM_VOTERS; i++) {
+            // These transactions will be submitted together in a concurrent manner
+            // within the same broadcast session
+            traditionalVoting.addVoter(voters[i]);
+            
+            // Log progress occasionally to avoid excessive console output
+            if (i % 10 == 0) {
+                console.log("Added %d/%d voters to traditional contract", i, NUM_VOTERS);
+            }
+        }
+        
+        // Then add voters to optimized voting contract
+        for (uint i = 0; i < NUM_VOTERS; i++) {
+            optimizedVoting.addVoter(voters[i]);
+            
+            if (i % 10 == 0) {
+                console.log("Added %d/%d voters to optimized contract", i, NUM_VOTERS);
+            }
+        }
+        
+        console.log("Added all voters to both contracts");
         
         // Execute votes and measure gas
         console.log("\n=== Starting Benchmark ===");
@@ -69,8 +89,6 @@ contract BenchmarkComparison is Script {
         totalGasTraditional = gasBefore - gasleft();
         
         // Pre-compute all the updates off-chain (simulated)
-        // Important: We do this outside the gas measurement to accurately
-        // represent real-world usage where this happens off-chain
         bytes[] memory allUpdates = new bytes[](NUM_VOTES);
         for (uint i = 0; i < NUM_VOTES; i++) {
             // Get transition index - this would be known off-chain

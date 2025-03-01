@@ -11,7 +11,7 @@ contract GasBenchmark is Test {
     PaymentContract paymentContract;
     
     // Define constants for benchmarking
-    uint256 constant NUM_VOTERS = 200; // Adjust as needed
+    uint256 constant NUM_VOTERS = 3000; 
     address public constant BLS_SIG_CHECKER = address(0xB6861c61782aec28a14cF68cECf216Ad7f5F4e2D);
     address payable testUser = payable(address(0x123));
 
@@ -21,7 +21,7 @@ contract GasBenchmark is Test {
         votingContract = new VotingContract(address(paymentContract));
         
         // Setup test user with sufficient funds
-        vm.deal(testUser, 100 ether);
+        vm.deal(testUser, 10000000000000000000000000000 ether);
         
         // Add many voters to make the gas costs significant
         for (uint i = 0; i < NUM_VOTERS; i++) {
