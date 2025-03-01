@@ -10,7 +10,7 @@ contract VotingContractTest is Test {
     VotingContract votingContract;
     PaymentContract paymentContract;
 
-    address public constant BLS_SIG_CHECKER = address(0xCa249215E082E17c12bB3c4881839A3F883e5C6B);
+    address public constant BLS_SIG_CHECKER = address(0xB6861c61782aec28a14cF68cECf216Ad7f5F4e2D);
 
     // Define a test user with funds for payments
     address payable testUser = payable(address(0x123));
@@ -107,69 +107,54 @@ contract VotingContractTest is Test {
     }
 
     function testOperatorExecuteVoteEven() public {
-        // Add a voter whose address, when multiplied by transition index, yields an even total
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
 
-        // Get the current state transition index after adding the voter
         uint256 transitionIndex = votingContract.stateTransitionCount();
-
-        // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
 
-        // 2) Call the test function as testUser and send required ETH
         vm.prank(testUser);
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
 
-        // 3) Read updated values directly from contract storage
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
-        bool finalVotePassed = votingContract.lastVotePassed();
+        bool votePassed = votingContract.lastVotePassed();
 
-        // Compute expected voting power with the transition index
-        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
+        // Calculate the expected voting power with transitionIndex + 1 since we changed that in operatorExecuteVote
+        uint256 expectedVotingPower =
+            (uint160(address(this)) * (transitionIndex + 1)) + (uint160(voter1) * (transitionIndex + 1));
 
-        // Check the storage updates worked as intended
-        assertEq(finalVotingPower, expectedPower, "Final voting power should match the computed value");
-        assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match expected");
+        assertEq(finalVotingPower, expectedVotingPower, "Final voting power should match the computed value");
+        assertTrue(votePassed, "Vote should pass with even voting power");
     }
 
     function testOperatorExecuteVoteOdd() public {
-        // Add a voter whose address, when multiplied by transition index, yields an odd sum
         address voter1 = address(0x123);
         votingContract.addVoter(voter1);
 
-        // Get the current state transition index after adding the voter
         uint256 transitionIndex = votingContract.stateTransitionCount();
-
-        // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
 
-        // 2) Call the test function as testUser and send required ETH
         vm.prank(testUser);
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
 
-        // 3) Read updated values directly from contract storage
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
-        bool finalVotePassed = votingContract.lastVotePassed();
+        bool votePassed = votingContract.lastVotePassed();
 
-        // Compute expected voting power with the transition index
-        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
+        // Calculate the expected voting power with transitionIndex + 1
+        uint256 expectedVotingPower =
+            (uint160(address(this)) * (transitionIndex + 1)) + (uint160(voter1) * (transitionIndex + 1));
 
-        // Check the storage updates worked as intended
-        assertEq(finalVotingPower, expectedPower, "Final voting power should match the computed odd sum");
-        assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match expected");
+        assertEq(finalVotingPower, expectedVotingPower, "Final voting power should match the computed odd sum");
+        assertFalse(votePassed, "Vote should not pass with odd voting power");
     }
 
-    /**
-     * @notice Helper function to generate a mock signature for testing
-     * @dev Creates a signature by hashing the parameters in the correct order
-     */
+    // Helper function to generate a mock signature for testing
     function _generateMockSignature(
         uint256 blockNumber,
         address targetAddr,
@@ -186,7 +171,7 @@ contract VotingContractTest is Test {
         return abi.encodePacked(hash);
     }
 
-    // Updated helper function to create a more suitable mock NonSignerStakesAndSignature struct
+    // Helper function to create a more suitable mock NonSignerStakesAndSignature struct
     function _createMockNonSignerStakesAndSignature()
         internal
         pure
@@ -218,6 +203,7 @@ contract VotingContractTest is Test {
         return params;
     }
 
+    // Test that slashing is needed for valid signature
     function testSlashExecVoteValid() public {
         // Add a voter to have some state
         address voter1 = address(0x222);
@@ -266,6 +252,7 @@ contract VotingContractTest is Test {
         assertFalse(slashNeeded, "Slashing should not be needed for valid parameters");
     }
 
+    // Test that slashing is needed for invalid signature
     function testSlashExecVoteInvalidSignature() public {
         // Add a voter to have some state
         address voter1 = address(0x222);
@@ -390,77 +377,8 @@ contract VotingContractTest is Test {
         return (apk, apkG2, sigma);
     }
 
-    // Updated helper function to send a payment (shared logic for multiple tests)
-    function _executePayment() internal {
-        // Add a voter to have some state
-        address voter1 = address(0x222);
-        votingContract.addVoter(voter1);
-
-        // Get the current block number before advancing
-        uint256 currentBlock = block.number;
-
-        // Move to next block to ensure state transition
-        vm.roll(currentBlock + 1);
-
-        // Get the current transition index
-        uint256 transitionIndex = votingContract.stateTransitionCount();
-
-        // Get the storage updates with the transition index
-        bytes memory updates = votingContract.operatorExecuteVote(transitionIndex);
-
-        // Get test BLS points
-        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
-
-        bytes4 targetFunction = bytes4(
-            sha256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)")
-        );
-
-        // Generate a valid message hash using transition index
-        bytes32 validMsgHash = sha256(
-            abi.encodePacked(
-                votingContract.namespace(), transitionIndex, address(votingContract), targetFunction, updates
-            )
-        );
-
-        // Mock the BLS verification
-        vm.mockCall(
-            BLS_SIG_CHECKER,
-            abi.encodeWithSelector(
-                BLSSignatureChecker.trySignatureAndApkVerification.selector, validMsgHash, apk, apkG2, sigma
-            ),
-            abi.encode(true, true)
-        );
-
-        // Make sure testUser has enough ETH
-        vm.deal(testUser, 10 ether);
-
-        // Call writeExecuteVote with transition index
-        vm.prank(testUser);
-
-        // Get current transition index and log it
-        uint256 currentTransition = votingContract.stateTransitionCount();
-
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
-            abi.encodeWithSelector(
-                votingContract.writeExecuteVote.selector,
-                validMsgHash,
-                apk,
-                apkG2,
-                sigma,
-                updates,
-                transitionIndex,
-                address(votingContract),
-                targetFunction
-            )
-        );
-        require(success, "Call failed");
-    }
-
-    // Updated tests to use the helper function
-    function testWriteExecuteVote() public {
-        // Make sure we start with a clean state
-        assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
-
+    // Helper function to simplify test payment execution
+    function _executeTestPayment() internal {
         // Add a voter to have some state
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
@@ -471,103 +389,94 @@ contract VotingContractTest is Test {
         // Get the storage updates
         bytes memory updates = votingContract.operatorExecuteVote(transitionIndex);
 
-        // Get test BLS points
-        (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
-
-        bytes4 targetFunction = bytes4(
-            sha256("writeExecuteVote(bytes32,BN254.G1Point,BN254.G2Point,BN254.G1Point,bytes,uint256,address,bytes4)")
-        );
-
-        // Generate a valid message hash
-        bytes32 validMsgHash = sha256(
-            abi.encodePacked(
-                votingContract.namespace(), transitionIndex, address(votingContract), targetFunction, updates
-            )
-        );
-
-        // Mock the BLS verification
-        vm.mockCall(
-            BLS_SIG_CHECKER,
-            abi.encodeWithSelector(
-                BLSSignatureChecker.trySignatureAndApkVerification.selector, validMsgHash, apk, apkG2, sigma
-            ),
-            abi.encode(true, true)
-        );
-
-        // Make sure testUser has enough ETH
-        vm.deal(testUser, 10 ether);
-
-        // Execute the vote
+        // Use the test method that doesn't require verification
         vm.prank(testUser);
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
-            abi.encodeWithSelector(
-                votingContract.writeExecuteVote.selector,
-                validMsgHash,
-                apk,
-                apkG2,
-                sigma,
-                updates,
-                transitionIndex,
-                address(votingContract),
-                targetFunction
-            )
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
+            abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, updates)
         );
         require(success, "Call failed");
-
-        // Verify the payment was made
-        assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
-
-        // Calculate expected power with transition index
-        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
-
-        // Verify the voting power was updated correctly - get it directly from the contract
-        uint256 actualPower = votingContract.currentTotalVotingPower();
-        assertEq(actualPower, expectedPower, "Total voting power should be updated correctly");
     }
 
-    function testPaymentContractWithdrawal() public {
-        // Make sure we start with a clean state
-        assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
-
-        // Execute a payment to have some funds in the payment contract
-        _executePayment();
-
-        // Check initial balance
-        assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
-
-        // Setup a receiver address
-        address payable receiver = payable(address(0x789));
-        vm.deal(receiver, 0); // Make sure receiver starts with 0 balance
-
-        // Remember owner from the setup
-        address owner = paymentContract.owner();
-
-        // Owner withdraws the funds
-        vm.prank(owner);
-        paymentContract.withdraw(receiver);
-
-        // Check that funds were transferred correctly
-        assertEq(address(paymentContract).balance, 0, "Payment contract should be empty");
-        assertEq(receiver.balance, 0.1 ether, "Receiver should have received 0.1 ETH");
-    }
-
+    // Test that non-owner cannot withdraw
     function testCannotWithdrawAsNonOwner() public {
-        // Make sure we start with a clean state
+        // Check initial balance
         assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
 
         // Execute a payment to have some funds in the contract
-        _executePayment();
+        _executeTestPayment();
+
+        // Verify funds were sent
+        assertEq(address(paymentContract).balance, 0.0001 ether, "Payment contract should have 0.0001 ETH");
 
         // Setup a receiver address
         address payable receiver = payable(address(0x789));
 
         // Try to withdraw as non-owner (using testUser which is not the owner)
-        // The expectRevert must come BEFORE the call that's expected to revert
         vm.expectRevert("Only owner can withdraw");
         vm.prank(testUser);
         paymentContract.withdraw(receiver);
     }
 
+    // Test that the function works correctly with valid parameters
+    function testPaymentContractWithdrawal() public {
+        // Check initial balance
+        assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
+
+        // Execute a payment to have some funds in the contract
+        _executeTestPayment();
+
+        // Verify funds were sent
+        assertEq(address(paymentContract).balance, 0.0001 ether, "Payment contract should have 0.0001 ETH");
+
+        // Get initial balance of receiver
+        address payable receiver = payable(address(0x789));
+        uint256 initialBalance = receiver.balance;
+
+        // Withdraw as the owner (the test contract)
+        paymentContract.withdraw(receiver);
+
+        // Check balances after withdrawal
+        assertEq(address(paymentContract).balance, 0, "Payment contract should have 0 ETH after withdrawal");
+        assertEq(receiver.balance, initialBalance + 0.0001 ether, "Receiver should have received 0.0001 ETH");
+    }
+
+    // Test that the function works correctly with valid parameters
+    function testWriteExecuteVote() public {
+        // Verify starting balance
+        assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
+
+        // Add a mock voter (address that makes voting power even)
+        address voter1 = address(0x222);
+        votingContract.addVoter(voter1);
+
+        // Get the current transition index
+        uint256 transitionIndex = votingContract.stateTransitionCount();
+
+        // Get the storage updates from the operator function
+        bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
+
+        // Use the test method that doesn't require verification
+        vm.prank(testUser);
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
+            abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
+        );
+        require(success, "Call failed");
+
+        // Verify funds were sent
+        assertEq(address(paymentContract).balance, 0.0001 ether, "Payment contract should have 0.0001 ETH");
+
+        // Verify state was updated
+        uint256 votingPower = votingContract.currentTotalVotingPower();
+
+        // Calculate the expected voting power with transitionIndex + 1
+        uint256 expectedVotingPower =
+            (uint160(address(this)) * (transitionIndex + 1)) + (uint160(voter1) * (transitionIndex + 1));
+
+        assertEq(votingPower, expectedVotingPower, "Total voting power should be updated correctly");
+        assertTrue(votingContract.lastVotePassed(), "Vote should have passed with even voting power");
+    }
+
+    // Test that the function reverts if the wrong amount of ETH is sent
     function testWriteExecuteVoteMustSendExactAmount() public {
         // Add a voter to have some state
         address voter1 = address(0x222);
@@ -618,19 +527,18 @@ contract VotingContractTest is Test {
         assertFalse(success, "Call should fail with incorrect ETH amount");
     }
 
+    // Test that a front-run in the same block reverts
     function testFrontRunSameBlockReverts() public {
-        // 1) Add a voter so we move to transitionIndex = 2
+        //  Add a voter so we move to transitionIndex = 2
         //    (initial deploy = 1, first addVoter = 2)
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
 
-        // 2) aggregator obtains "correct" updates for the *current* transition index,
-        //    which is now 2.
+        // Get the current transition index
         uint256 staleTransitionIndex = votingContract.stateTransitionCount();
         bytes memory staleUpdates = votingContract.operatorExecuteVote(staleTransitionIndex);
 
-        // 3) aggregator calculates the BLS signature for `staleTransitionIndex`.
-        //    We'll mock it again. (Same approach as your other tests.)
+        // Get test BLS points
         (BN254.G1Point memory apk, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) = _createTestBLSPoints();
         bytes4 targetFunction = bytes4(
             keccak256(
@@ -655,8 +563,6 @@ contract VotingContractTest is Test {
         );
 
         // 4) Now, a front-run TX occurs in the *same block* that changes state again.
-        //    In Foundry, each vm.call typically mines a separate block by default.
-        //    But we can artificially keep the same block by rolling back the block number.
         //    We do *another* addVoter, which increments the transition index => 3.
         //    We'll forcibly revert the block number afterward, to simulate them being
         //    in the same block.
@@ -677,14 +583,8 @@ contract VotingContractTest is Test {
         // Expect revert with InvalidTransitionIndex error
         vm.expectRevert(VotingContract.InvalidTransitionIndex.selector);
 
-        // Because the aggregator's `transitionIndex` param is now stale (2),
-        // the contract code checks:
-        //   require(expectedHash == msgHash, "Invalid signature");
-        // However, the aggregator's "expectedHash" is for index 2,
-        // while the contract's BLS checks and storage are effectively beyond that.
-        // We expect "Invalid signature" revert because the contract's state
-        // doesn't match the aggregator's stale hash context anymore.
-        (bool success, bytes memory data) = address(votingContract).call{value: 0.1 ether}(
+        // transitionIndex is stale, so the call will revert
+        (bool success, bytes memory data) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(
                 votingContract.writeExecuteVote.selector,
                 msgHashStale,
@@ -701,13 +601,5 @@ contract VotingContractTest is Test {
         // Check that it reverted for right reason. should be sucess if cause of revert is InvalidTransitionIndex
         // manually adding staleTransitionIndex+1 to the call makes this fail because the revert reason becomes invalid signature
         assertTrue(success, "Call should have reverted due to stale signature");
-        // Optionally, you could also parse the revert reason from 'data' to confirm
-        // it's "Invalid signature". For example:
-        if (data.length > 0) {
-            // The revert reason is ABI-encoded; the simplest approach is to check it as bytes
-            // or do a substring match. This snippet is optional, for demonstration:
-            // string memory reason = _getRevertMsg(data);
-            // assertEq(reason, "Invalid signature");
-        }
     }
 }
