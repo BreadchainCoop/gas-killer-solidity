@@ -23,9 +23,11 @@ This pattern can be applied to any computation-heavy smart contract to significa
 
 The optimized approach of running complex calculations off-chain and only applying storage updates on-chain demonstrates substantial gas savings:
 
-- With 3000 voters: ~85-90% gas reduction
-- With 1000 voters: ~80-85% gas reduction
-- With 100 voters: ~70-75% gas reduction
+- With 3000 voters: ~99% gas reduction
+- With 1000 voters: ~97% gas reduction
+- With 100 voters: ~81% gas reduction
+- With 40 voters: ~63% gas reduction
+- With 15 voters: ~38% gas reduction
 
 As the number of voters increases, the gas savings become more pronounced, making this approach highly scalable for applications with large data sets.
 

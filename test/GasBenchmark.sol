@@ -11,7 +11,7 @@ contract GasBenchmark is Test {
     PaymentContract paymentContract;
     
     // Define constants for benchmarking
-    uint256 constant NUM_VOTERS = 3000; 
+    uint256 constant NUM_VOTERS = 40; 
     address public constant BLS_SIG_CHECKER = address(0xB6861c61782aec28a14cF68cECf216Ad7f5F4e2D);
     address payable testUser = payable(address(0x123));
 
