@@ -1,3 +1,18 @@
+## Gas Killer Smart Contracts 
+
+Gas Killer is an AVS that uses BLS signature verification to securely simualte a transaction off chain and write back the storage slot updates to save gas associated with read and compute operations.
+
+Our intentionally "dumb" voting contract loops through a large array of voters to calculate voting power to help us show gas saving potnetial 
+
+# Features 
+- **BLS Signature Verification**: Uses BLS signature aggregation for efficient multi-party consensus
+- **Slashing Mechanism**: Implements objective on chain slashing
+- **State Transition Management**: Tracks state transitions for consistent voting power calculation. Reverting if another write opperation occurs first within same block before operator updates storage
+
+# Gas Savings 
+
+Info about how much gas we have saved here
+
 ## Foundry
 
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
