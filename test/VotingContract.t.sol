@@ -107,63 +107,51 @@ contract VotingContractTest is Test {
     }
 
     function testOperatorExecuteVoteEven() public {
-        // Add a voter whose address, when multiplied by transition index, yields an even total
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
-
-        // Get the current state transition index after adding the voter
+        
         uint256 transitionIndex = votingContract.stateTransitionCount();
-
-        // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
-
-        // 2) Call the test function as testUser and send required ETH
+        
         vm.prank(testUser);
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
-
-        // 3) Read updated values directly from contract storage
+        
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
-        bool finalVotePassed = votingContract.lastVotePassed();
-
-        // Compute expected voting power with the transition index
-        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
-
-        // Check the storage updates worked as intended
-        assertEq(finalVotingPower, expectedPower, "Final voting power should match the computed value");
-        assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match expected");
+        bool votePassed = votingContract.lastVotePassed();
+        
+        // Calculate the expected voting power with transitionIndex + 1 since we changed that in operatorExecuteVote
+        uint256 expectedVotingPower = (uint160(address(this)) * (transitionIndex + 1)) + 
+                                     (uint160(voter1) * (transitionIndex + 1));
+        
+        assertEq(finalVotingPower, expectedVotingPower, "Final voting power should match the computed value");
+        assertTrue(votePassed, "Vote should pass with even voting power");
     }
 
     function testOperatorExecuteVoteOdd() public {
-        // Add a voter whose address, when multiplied by transition index, yields an odd sum
         address voter1 = address(0x123);
         votingContract.addVoter(voter1);
-
-        // Get the current state transition index after adding the voter
+        
         uint256 transitionIndex = votingContract.stateTransitionCount();
-
-        // 1) Simulate off-chain aggregator: obtain the storage update payload
         bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
-
-        // 2) Call the test function as testUser and send required ETH
+        
         vm.prank(testUser);
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
-
-        // 3) Read updated values directly from contract storage
+        
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
-        bool finalVotePassed = votingContract.lastVotePassed();
-
-        // Compute expected voting power with the transition index
-        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
-
-        // Check the storage updates worked as intended
-        assertEq(finalVotingPower, expectedPower, "Final voting power should match the computed odd sum");
-        assertEq(finalVotePassed, expectedPower % 2 == 0, "Vote result should match expected");
+        bool votePassed = votingContract.lastVotePassed();
+        
+        // Calculate the expected voting power with transitionIndex + 1
+        uint256 expectedVotingPower = (uint160(address(this)) * (transitionIndex + 1)) + 
+                                     (uint160(voter1) * (transitionIndex + 1));
+        
+        assertEq(finalVotingPower, expectedVotingPower, "Final voting power should match the computed odd sum");
+        assertFalse(votePassed, "Vote should not pass with odd voting power");
     }
 
     // Helper function to generate a mock signature for testing
@@ -403,7 +391,7 @@ contract VotingContractTest is Test {
 
         // Use the test method that doesn't require verification
         vm.prank(testUser);
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, updates)
         );
         require(success, "Call failed");
@@ -418,7 +406,7 @@ contract VotingContractTest is Test {
         _executeTestPayment();
 
         // Verify funds were sent
-        assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
+        assertEq(address(paymentContract).balance, 0.0001 ether, "Payment contract should have 0.0001 ETH");
 
         // Setup a receiver address
         address payable receiver = payable(address(0x789));
@@ -438,7 +426,7 @@ contract VotingContractTest is Test {
         _executeTestPayment();
 
         // Verify funds were sent
-        assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
+        assertEq(address(paymentContract).balance, 0.0001 ether, "Payment contract should have 0.0001 ETH");
 
         // Get initial balance of receiver
         address payable receiver = payable(address(0x789));
@@ -449,40 +437,43 @@ contract VotingContractTest is Test {
 
         // Check balances after withdrawal
         assertEq(address(paymentContract).balance, 0, "Payment contract should have 0 ETH after withdrawal");
-        assertEq(receiver.balance, initialBalance + 0.1 ether, "Receiver should have received 0.1 ETH");
+        assertEq(receiver.balance, initialBalance + 0.0001 ether, "Receiver should have received 0.0001 ETH");
     }
 
     // Test that the function works correctly with valid parameters
     function testWriteExecuteVote() public {
-        // Make sure we start with a clean state
+        // Verify starting balance
         assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
-
-        // Add a voter to have some state
+        
+        // Add a mock voter (address that makes voting power even)
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
-
+        
         // Get the current transition index
         uint256 transitionIndex = votingContract.stateTransitionCount();
-
-        // Get the storage updates
-        bytes memory updates = votingContract.operatorExecuteVote(transitionIndex);
-
-        // Use the test method that doesn't require complex verification
+        
+        // Get the storage updates from the operator function
+        bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
+        
+        // Use the test method that doesn't require verification
         vm.prank(testUser);
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
-            abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, updates)
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
+            abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
-
-        // Verify the payment was made
-        assertEq(address(paymentContract).balance, 0.1 ether, "Payment contract should have 0.1 ETH");
-
-        // Calculate expected power with transition index
-        uint256 expectedPower = (uint160(address(this)) * transitionIndex) + (uint160(voter1) * transitionIndex);
-
-        // Verify the voting power was updated correctly
-        uint256 actualPower = votingContract.currentTotalVotingPower();
-        assertEq(actualPower, expectedPower, "Total voting power should be updated correctly");
+        
+        // Verify funds were sent
+        assertEq(address(paymentContract).balance, 0.0001 ether, "Payment contract should have 0.0001 ETH");
+        
+        // Verify state was updated
+        uint256 votingPower = votingContract.currentTotalVotingPower();
+        
+        // Calculate the expected voting power with transitionIndex + 1
+        uint256 expectedVotingPower = (uint160(address(this)) * (transitionIndex + 1)) + 
+                                     (uint160(voter1) * (transitionIndex + 1));
+        
+        assertEq(votingPower, expectedVotingPower, "Total voting power should be updated correctly");
+        assertTrue(votingContract.lastVotePassed(), "Vote should have passed with even voting power");
     }
 
     // Test that the function reverts if the wrong amount of ETH is sent
@@ -593,7 +584,7 @@ contract VotingContractTest is Test {
         vm.expectRevert(VotingContract.InvalidTransitionIndex.selector);
 
         // transitionIndex is stale, so the call will revert
-        (bool success, bytes memory data) = address(votingContract).call{value: 0.1 ether}(
+        (bool success, bytes memory data) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(
                 votingContract.writeExecuteVote.selector,
                 msgHashStale,

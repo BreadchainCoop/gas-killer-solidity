@@ -167,7 +167,7 @@ contract VotingContract is StateTracker {
         bytes4 targetFunction
     ) external payable trackState returns (bytes memory) {
         require(transitionIndex + 1 == stateTransitionCount(), InvalidTransitionIndex());
-        require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
+        require(msg.value == 0.0001 ether, "Must send exactly 0.0001 ETH");
         paymentContract.deposit{value: msg.value}();
 
         bytes32 expectedHash = sha256(abi.encode(transitionIndex, targetAddr, targetFunction, storageUpdates));
@@ -315,7 +315,7 @@ contract VotingContract is StateTracker {
 
     // Test-only version of writeExecuteVote that skips signature verification
     function writeExecuteVoteTest(bytes calldata storageUpdates) external payable trackState returns (bytes memory) {
-        require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
+        require(msg.value == 0.0001 ether, "Must send exactly 0.0001 ETH");
         paymentContract.deposit{value: msg.value}();
 
         uint256 i = 0;

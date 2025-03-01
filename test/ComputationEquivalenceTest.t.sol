@@ -68,7 +68,7 @@ contract ComputationEquivalenceTest is Test {
             
             // Apply the updates on-chain
             vm.prank(testUser);
-            (bool success,) = address(votingContract).call{value: 0.1 ether}(
+            (bool success,) = address(votingContract).call{value: 0.0001 ether}(
                 abi.encodeWithSelector(
                     votingContract.writeExecuteVoteTest.selector,
                     updates

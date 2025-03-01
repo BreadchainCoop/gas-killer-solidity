@@ -28,8 +28,8 @@ contract PaymentContract {
      * @dev Called by VotingContract to deposit exactly 0.1 ETH.
      */
     function deposit() external payable {
-        require(msg.value == 0.1 ether, "Must send exactly 0.1 ETH");
-        // The 0.1 ETH now sits in this contract's balance.
+        require(msg.value == 0.0001 ether, "Must send exactly 0.0001 ETH");
+        // The 0.0001 ETH now sits in this contract's balance.
         // You can track or emit events here as needed.
     }
 

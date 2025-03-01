@@ -71,7 +71,7 @@ contract GasBenchmark is Test {
         uint256 gasBefore = gasleft();
         
         // Use writeExecuteVoteTest instead for benchmarking
-        (bool success,) = address(votingContract).call{value: 0.1 ether}(
+        (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(
                 votingContract.writeExecuteVoteTest.selector,
                 updates
