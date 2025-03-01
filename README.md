@@ -2,7 +2,9 @@
 
 Gas Killer is an AVS that uses BLS signature verification to securely simulate a transaction off chain and write back the storage slot updates to save gas associated with read and compute operations.
 
-Our intentionally "dumb" voting contract loops through a large array of voters to calculate voting power to help us show gas saving potential.
+Our intentionally "dumb" voting contract loops through a large array of voters to calculate voting power to show gas savings.
+
+Gas Killer does not enforce any changes to existing solidity functions, nor externalizes the contract storage. Existing contracts can be integrated with continued support to existing flows and infra. 
 
 # How It Works
 
@@ -30,6 +32,12 @@ The optimized approach of running complex calculations off-chain and only applyi
 - With 15 voters: ~38% gas reduction
 
 As the number of voters increases, the gas savings become more pronounced, making this approach highly scalable for applications with large data sets.
+
+
+# Integration path 
+1. Autogenerate functions based on the target function (for gas savings) that implement slashing, AVS access control, and contract storage tracking.
+2. Deploy an upgraded version of the original contract (all previous functions are still supported) 
+3. Redirect existing transactions to the AVS instead of the contract 
 
 # Running Tests
 
