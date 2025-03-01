@@ -85,11 +85,11 @@ contract GasBenchmark is Test {
         // Get final values
         uint256 finalVotingPower1 = votingContract.currentTotalVotingPower();
         bool finalVotePassed1 = votingContract.lastVotePassed();
-        console.log("Final voting power: %d, Vote passed: %s", 
-            finalVotingPower1, 
-            finalVotePassed1 ? "true" : "false"
-        );
-        
+        // console.log("Final voting power: %d, Vote passed: %s", 
+        //     finalVotingPower1, 
+        //     finalVotePassed1 ? "true" : "false"
+        // );
+
         // Reset to starting state
         vm.revertTo(snapshot);
         

@@ -133,7 +133,7 @@ contract VotingContract is StateTracker {
      */
     function operatorExecuteVote(uint256 transitionIndex) external view returns (bytes memory) {
         // 1) Calculate new voting power
-        uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex);
+        uint256 newVotingPower = getCurrentTotalVotingPower(transitionIndex+1);
 
         // 2) Determine if vote passes (true if even)
         bool votePassed = (newVotingPower % 2 == 0);
