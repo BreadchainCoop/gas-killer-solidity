@@ -109,23 +109,23 @@ contract VotingContractTest is Test {
     function testOperatorExecuteVoteEven() public {
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
-        
+
         uint256 transitionIndex = votingContract.stateTransitionCount();
         bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
-        
+
         vm.prank(testUser);
         (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
-        
+
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
         bool votePassed = votingContract.lastVotePassed();
-        
+
         // Calculate the expected voting power with transitionIndex + 1 since we changed that in operatorExecuteVote
-        uint256 expectedVotingPower = (uint160(address(this)) * (transitionIndex + 1)) + 
-                                     (uint160(voter1) * (transitionIndex + 1));
-        
+        uint256 expectedVotingPower =
+            (uint160(address(this)) * (transitionIndex + 1)) + (uint160(voter1) * (transitionIndex + 1));
+
         assertEq(finalVotingPower, expectedVotingPower, "Final voting power should match the computed value");
         assertTrue(votePassed, "Vote should pass with even voting power");
     }
@@ -133,23 +133,23 @@ contract VotingContractTest is Test {
     function testOperatorExecuteVoteOdd() public {
         address voter1 = address(0x123);
         votingContract.addVoter(voter1);
-        
+
         uint256 transitionIndex = votingContract.stateTransitionCount();
         bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
-        
+
         vm.prank(testUser);
         (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
-        
+
         uint256 finalVotingPower = votingContract.currentTotalVotingPower();
         bool votePassed = votingContract.lastVotePassed();
-        
+
         // Calculate the expected voting power with transitionIndex + 1
-        uint256 expectedVotingPower = (uint160(address(this)) * (transitionIndex + 1)) + 
-                                     (uint160(voter1) * (transitionIndex + 1));
-        
+        uint256 expectedVotingPower =
+            (uint160(address(this)) * (transitionIndex + 1)) + (uint160(voter1) * (transitionIndex + 1));
+
         assertEq(finalVotingPower, expectedVotingPower, "Final voting power should match the computed odd sum");
         assertFalse(votePassed, "Vote should not pass with odd voting power");
     }
@@ -444,34 +444,34 @@ contract VotingContractTest is Test {
     function testWriteExecuteVote() public {
         // Verify starting balance
         assertEq(address(paymentContract).balance, 0, "Payment contract should start with 0 balance");
-        
+
         // Add a mock voter (address that makes voting power even)
         address voter1 = address(0x222);
         votingContract.addVoter(voter1);
-        
+
         // Get the current transition index
         uint256 transitionIndex = votingContract.stateTransitionCount();
-        
+
         // Get the storage updates from the operator function
         bytes memory storageUpdates = votingContract.operatorExecuteVote(transitionIndex);
-        
+
         // Use the test method that doesn't require verification
         vm.prank(testUser);
         (bool success,) = address(votingContract).call{value: 0.0001 ether}(
             abi.encodeWithSelector(votingContract.writeExecuteVoteTest.selector, storageUpdates)
         );
         require(success, "Call failed");
-        
+
         // Verify funds were sent
         assertEq(address(paymentContract).balance, 0.0001 ether, "Payment contract should have 0.0001 ETH");
-        
+
         // Verify state was updated
         uint256 votingPower = votingContract.currentTotalVotingPower();
-        
+
         // Calculate the expected voting power with transitionIndex + 1
-        uint256 expectedVotingPower = (uint160(address(this)) * (transitionIndex + 1)) + 
-                                     (uint160(voter1) * (transitionIndex + 1));
-        
+        uint256 expectedVotingPower =
+            (uint160(address(this)) * (transitionIndex + 1)) + (uint160(voter1) * (transitionIndex + 1));
+
         assertEq(votingPower, expectedVotingPower, "Total voting power should be updated correctly");
         assertTrue(votingContract.lastVotePassed(), "Vote should have passed with even voting power");
     }
